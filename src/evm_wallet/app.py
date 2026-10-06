@@ -7,6 +7,7 @@ import os
 import re
 import stat
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, TextIO
@@ -19,12 +20,22 @@ from .chains import (
     chain_from_config,
     validate_rpc_url,
 )
-from .config import ConfigStore, validate_alias
+from .config import ConfigStore, validate_alias, validate_contact_name, validate_symbol
 from .errors import ConfigurationError, FoundryError, WalletCliError
 from .foundry import CastClient, parse_integer_output, unwrap_cast_json
 from .help import help_text
+from .txlog import TXLOG_LIMIT, append_transaction, read_transactions
 
 KEYSTORE_ADDRESS_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+BLOCK_REFERENCE_RE = re.compile(
+    r"^(?:0x[0-9a-fA-F]+|[0-9]+|latest|earliest|pending|finalized|safe)$"
+)
+TOKEN_USAGE = (
+    "Usage: token balance CONTRACT [ADDRESS] | token send CONTRACT DESTINATION "
+    "AMOUNT [--dry-run | --yes] | token info CONTRACT | token list [ADDRESS] | "
+    "token add CONTRACT [SYMBOL] | token remove CONTRACT | token allowance CONTRACT "
+    "SPENDER [OWNER] | token revoke CONTRACT SPENDER [--dry-run | --yes]."
+)
 
 
 class Application:
@@ -61,7 +72,12 @@ class Application:
         self.rpc_url_override = validate_rpc_url(rpc_url) if rpc_url else None
         self.session_wallet_alias: str | None = None
         self.history: list[str] = []
+        self.verbose = False
+        self.sleep: Callable[[float], None] = time.sleep
+        self.watch_attempts = 30
+        self.watch_interval = 2.0
         self.history_path = self.store.directory / "history"
+        self.transactions_path = self.store.directory / "transactions.jsonl"
 
     def config(self) -> dict[str, Any]:
         return self.store.load()
@@ -99,8 +115,12 @@ class Application:
 
     def wallet(
         self, alias: str | None = None, state: dict[str, Any] | None = None
-    ) -> tuple[str, dict[str, Any], Path]:
-        """Return (alias, metadata, keystore) for the selected wallet."""
+    ) -> tuple[str, dict[str, Any], Path | None]:
+        """Return (alias, metadata, keystore) for the selected wallet.
+
+        ``keystore`` is ``None`` for a watch-only wallet, which can be read from but
+        never signs.
+        """
         state = state or self.config()
         selected = alias or self.active_wallet_alias(state)
         if not selected:
@@ -110,9 +130,20 @@ class Application:
         if selected not in state["wallets"]:
             raise WalletCliError(f"Wallet alias '{selected}' was not found.")
         metadata = state["wallets"][selected]
-        keystore = self.store.keystore_path(metadata)
-        self.validate_keystore_file(keystore, expected_address=metadata["address"])
+        keystore: Path | None = None
+        if "keystore" in metadata:
+            keystore = self.store.keystore_path(metadata)
+            self.validate_keystore_file(keystore, expected_address=metadata["address"])
         return selected, metadata, keystore
+
+    def require_signing_wallet(self, alias: str, keystore: Path | None, action: str) -> Path:
+        """Return the keystore to sign with, or refuse for a watch-only wallet."""
+        if keystore is None:
+            raise WalletCliError(
+                f"Wallet '{alias}' is watch-only and cannot {action}. "
+                "Import its key or select a signing wallet."
+            )
+        return keystore
 
     def require_terminal(self, action: str) -> None:
         """Fail unless stdin and stdout are terminals for a hidden keystore prompt."""
@@ -277,7 +308,7 @@ class Application:
         if alias not in state["wallets"]:
             raise WalletCliError(f"Wallet alias '{alias}' was not found.")
         metadata = state["wallets"][alias]
-        keystore = self.store.keystore_path(metadata)
+        keystore = self.store.keystore_path(metadata) if "keystore" in metadata else None
         if not yes:
             answer = self.input_fn(
                 f"Delete local wallet '{alias}' ({metadata['address']})?\n"
@@ -295,18 +326,24 @@ class Application:
                 config["current_wallet"] = None
 
         self.store.update(remove)
-        try:
-            keystore.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            raise ConfigurationError(
-                "The wallet alias was removed, but its encrypted keystore file "
-                f"could not be deleted: {exc.strerror}."
-            ) from exc
+        if keystore is not None:
+            try:
+                keystore.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise ConfigurationError(
+                    "The wallet alias was removed, but its encrypted keystore file "
+                    f"could not be deleted: {exc.strerror}."
+                ) from exc
         if self.session_wallet_alias == alias:
             self.session_wallet_alias = None
-        return {"command": "wallet delete", "alias": alias, "address": metadata["address"]}
+        return {
+            "command": "wallet delete",
+            "alias": alias,
+            "address": metadata["address"],
+            "watch_only": keystore is None,
+        }
 
     @staticmethod
     def _parse_json_result(output: str, label: str) -> Any:
@@ -323,41 +360,130 @@ class Application:
         self, chain: Chain, contract: str, sender: str, destination: str, amount: int
     ) -> None:
         """Simulate an ERC-20 transfer and refuse to sign if it returns false."""
-        output = self.cast.call_raw(
-            chain,
-            contract,
-            "transfer(address,uint256)",
-            destination,
-            str(amount),
-            "--from",
-            sender,
+        self.simulate_erc20_call(
+            chain, contract, sender, "transfer(address,uint256)", destination, str(amount)
         )
-        text = output.strip()
+
+    def simulate_erc20_approve(
+        self, chain: Chain, contract: str, sender: str, spender: str, amount: int
+    ) -> None:
+        """Simulate an ERC-20 approve and refuse to sign if it returns false."""
+        self.simulate_erc20_call(
+            chain, contract, sender, "approve(address,uint256)", spender, str(amount)
+        )
+
+    def simulate_erc20_call(
+        self, chain: Chain, contract: str, sender: str, signature: str, *arguments: str
+    ) -> None:
+        """Call a token function from ``sender`` and require a true boolean result."""
+        output = self.cast.call_raw(chain, contract, signature, *arguments, "--from", sender)
+        _require_true_simulation(output)
+
+    def contract_string(self, chain: Chain, contract: str, signature: str) -> str:
+        """Read a string value from a contract call on the active chain."""
+        return _parse_cast_string(self.cast.call_raw(chain, contract, signature))
+
+    def record_transaction(self, record: dict[str, Any]) -> None:
+        """Append a broadcast transaction to the local log (best effort)."""
+        append_transaction(self.transactions_path, record)
+
+    def resolve_address(self, value: str, state: dict[str, Any], label: str = "address") -> str:
+        """Resolve a saved contact name, else return the validated hex address."""
+        contacts = state.get("contacts", {})
+        if value in contacts:
+            return contacts[value]
+        return validate_address(value, label)
+
+    def watch_wallet(self, alias: str, address: str) -> dict[str, Any]:
+        """Register a watch-only address that can be read from but never signs."""
+        alias = validate_alias(alias)
+        address = validate_address(address)
+
+        def add(config: dict[str, Any]) -> None:
+            if alias in config["wallets"]:
+                raise WalletCliError(
+                    f"Wallet alias '{alias}' already exists; choose another alias."
+                )
+            config["wallets"][alias] = {"address": address}
+            if config["default_wallet"] is None:
+                config["default_wallet"] = alias
+
+        updated = self.store.update(add)
+        return {
+            "command": "wallet watch",
+            "alias": alias,
+            "address": updated["wallets"][alias]["address"],
+            "watch_only": True,
+        }
+
+    def verify_wallets(self, alias: str | None = None) -> list[dict[str, Any]]:
+        """Re-check that each local wallet is readable and internally consistent."""
+        state = self.config()
+        aliases = [alias] if alias else sorted(state["wallets"])
+        entries: list[dict[str, Any]] = []
+        for name in aliases:
+            metadata = state["wallets"].get(name)
+            if metadata is None:
+                raise WalletCliError(f"Wallet alias '{name}' was not found.")
+            watch_only = "keystore" not in metadata
+            entry: dict[str, Any] = {
+                "alias": name,
+                "address": metadata["address"],
+                "watch_only": watch_only,
+                "valid": True,
+            }
+            try:
+                if watch_only:
+                    validate_address(metadata["address"])
+                else:
+                    path = self.store.keystore_path(metadata)
+                    self.validate_keystore_file(path, expected_address=metadata["address"])
+            except WalletCliError as exc:
+                entry["valid"] = False
+                entry["error"] = str(exc)
+            entries.append(entry)
+        return entries
+
+
+def _require_true_simulation(output: str) -> None:
+    """Accept a boolean or empty Cast simulation result, refusing an explicit false."""
+    text = output.strip()
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        decoded = text
+    if isinstance(decoded, dict) and decoded.get("success") is True:
+        decoded = decoded.get("data")
+    if isinstance(decoded, bool):
+        if not decoded:
+            raise WalletCliError("Token operation simulation returned false; refusing to sign.")
+        return
+    if not isinstance(decoded, str):
+        raise FoundryError("Foundry returned an invalid token simulation result.")
+    data = decoded.strip()
+    if data in {"", "0x", "0X"}:
+        # Some older ERC20 tokens omit the optional boolean return value.
+        return
+    if data.lower().startswith("0x"):
+        data = data[2:]
+    if not data or not re.fullmatch(r"[0-9a-fA-F]+", data):
+        raise FoundryError("Foundry returned an invalid token simulation result.")
+    result = int(data, 16)
+    if result == 0:
+        raise WalletCliError("Token operation simulation returned false; refusing to sign.")
+    if result != 1:
+        raise FoundryError("Foundry returned an invalid boolean value.")
+
+
+def _parse_cast_string(output: str) -> str:
+    """Return a Cast string result, unquoting a JSON string when present."""
+    text = output.strip()
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
         try:
-            decoded = json.loads(text)
+            return str(json.loads(text))
         except json.JSONDecodeError:
-            decoded = text
-        if isinstance(decoded, dict) and decoded.get("success") is True:
-            decoded = decoded.get("data")
-        if isinstance(decoded, bool):
-            if not decoded:
-                raise WalletCliError("Token transfer simulation returned false; refusing to sign.")
-            return
-        if not isinstance(decoded, str):
-            raise FoundryError("Foundry returned an invalid token transfer simulation result.")
-        data = decoded.strip()
-        if data in {"", "0x", "0X"}:
-            # Some older ERC20 tokens omit the optional boolean return value.
-            return
-        if data.lower().startswith("0x"):
-            data = data[2:]
-        if not data or not re.fullmatch(r"[0-9a-fA-F]+", data):
-            raise FoundryError("Foundry returned an invalid token transfer simulation result.")
-        result = int(data, 16)
-        if result == 0:
-            raise WalletCliError("Token transfer simulation returned false; refusing to sign.")
-        if result != 1:
-            raise FoundryError("Token transfer simulation returned an invalid boolean value.")
+            return text[1:-1]
+    return text
 
 
 def execute(command: list[str], app: Application, *, json_output: bool = False) -> dict[str, Any]:
@@ -368,10 +494,17 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
     if not tokens:
         raise WalletCliError("Enter a command. Use 'help' to see the command list.")
     if tokens[0] in {"help", "--help", "-h"}:
-        if len(tokens) > 2:
-            raise WalletCliError("Usage: help [TOPIC].")
-        topic = tokens[1] if len(tokens) == 2 else None
-        return {"command": "help", "topic": topic, "text": help_text(topic)}
+        verbose = app.verbose or "--verbose" in tokens or "-v" in tokens
+        args = [token for token in tokens[1:] if token not in {"--verbose", "-v"}]
+        if len(args) > 1:
+            raise WalletCliError("Usage: help [TOPIC] [--verbose].")
+        topic = args[0] if args else None
+        return {
+            "command": "help",
+            "topic": topic,
+            "verbose": verbose,
+            "text": help_text(topic, verbose=verbose),
+        }
     if tokens[0] == "clear":
         if len(tokens) != 1:
             raise WalletCliError("Usage: clear.")
@@ -384,7 +517,8 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
         if len(tokens) < 2:
             raise WalletCliError(
                 "Usage: wallet new|import ALIAS, wallet list|use|default|info [ALIAS], "
-                "wallet rename OLD NEW, wallet delete ALIAS [--yes]."
+                "wallet rename OLD NEW, wallet delete ALIAS [--yes], wallet watch ALIAS "
+                "ADDRESS, wallet verify [ALIAS]."
             )
         action = tokens[1]
         if action in {"new", "import"}:
@@ -401,6 +535,15 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             if len(args) != 1:
                 raise WalletCliError("Usage: wallet delete ALIAS [--yes].")
             return app.delete_wallet(args[0], yes=yes)
+        if action == "watch":
+            if len(tokens) != 4:
+                raise WalletCliError("Usage: wallet watch ALIAS ADDRESS.")
+            return app.watch_wallet(tokens[2], tokens[3])
+        if action == "verify" and len(tokens) in {2, 3}:
+            return {
+                "command": "wallet verify",
+                "wallets": app.verify_wallets(tokens[2] if len(tokens) == 3 else None),
+            }
         state = app.config()
         if action == "list" and len(tokens) == 2:
             wallets = []
@@ -411,6 +554,7 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
                         "address": metadata["address"],
                         "current": alias == app.active_wallet_alias(state),
                         "default": alias == state["default_wallet"],
+                        "watch_only": "keystore" not in metadata,
                     }
                 )
             return {"command": "wallet list", "wallets": wallets}
@@ -446,11 +590,13 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
                 "command": "wallet info",
                 "alias": alias,
                 "address": metadata["address"],
-                "keystore": str(keystore),
+                "keystore": str(keystore) if keystore is not None else None,
+                "watch_only": keystore is None,
             }
         raise WalletCliError(
             "Usage: wallet new|import ALIAS, wallet list|use|default|info [ALIAS], "
-            "wallet rename OLD NEW, wallet delete ALIAS [--yes]."
+            "wallet rename OLD NEW, wallet delete ALIAS [--yes], wallet watch ALIAS "
+            "ADDRESS, wallet verify [ALIAS]."
         )
 
     # Public address lookup.
@@ -515,7 +661,7 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
         state = app.config()
         chain = app.active_chain(state)
         address = (
-            validate_address(tokens[1], "address")
+            app.resolve_address(tokens[1], state)
             if len(tokens) == 2
             else app.wallet(state=state)[1]["address"]
         )
@@ -535,7 +681,7 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
         state = app.config()
         chain = app.active_chain(state)
         address = (
-            validate_address(tokens[1], "address")
+            app.resolve_address(tokens[1], state)
             if len(tokens) == 2
             else app.wallet(state=state)[1]["address"]
         )
@@ -549,19 +695,113 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             "nonce": str(raw),
         }
 
-    # Current gas price reported by the selected network.
+    # Current gas price and base fee reported by the selected network.
     if tokens[0] == "gas" and len(tokens) == 1:
         state = app.config()
         chain = app.active_chain(state)
-        output = app.cast.network(chain, ["gas-price"])
-        wei = parse_integer_output(output, "gas price")
+        wei = parse_integer_output(app.cast.network(chain, ["gas-price"]), "gas price")
+        try:
+            base_fee: int | None = parse_integer_output(
+                app.cast.network(chain, ["base-fee"]), "base fee"
+            )
+        except FoundryError:
+            base_fee = None
         return {
             "command": "gas",
             "chain": app.network_label(chain),
             "chain_id": chain.chain_id,
             "gas_price_wei": str(wei),
             "gas_price_gwei": format_units(wei, 9),
+            "base_fee_wei": str(base_fee) if base_fee is not None else None,
+            "base_fee_gwei": format_units(base_fee, 9) if base_fee is not None else None,
         }
+
+    # Native transfer gas estimate only, without signing or broadcasting.
+    if tokens[0] == "estimate" and len(tokens) == 3:
+        result = execute(["send", tokens[1], tokens[2], "--dry-run"], app)
+        result["command"] = "estimate"
+        return result
+
+    # Show the resolved profile, network, and storage settings.
+    if tokens[0] == "config":
+        if len(tokens) == 2 and tokens[1] == "show":
+            return _config_show(app)
+        raise WalletCliError("Usage: config show.")
+
+    # EIP-55 checksum an address locally, without any RPC request.
+    if tokens[0] == "checksum" and len(tokens) == 2:
+        address = validate_address(tokens[1], "address")
+        checksum = app.cast.run(["to-check-sum-address", address])
+        return {"command": "checksum", "address": address, "checksum": checksum}
+
+    # Read-only contract call for arbitrary view functions.
+    if tokens[0] == "call":
+        if len(tokens) < 3:
+            raise WalletCliError("Usage: call CONTRACT SIGNATURE [ARGS...].")
+        contract = validate_address(tokens[1], "contract")
+        signature = tokens[2]
+        state = app.config()
+        chain = app.active_chain(state)
+        value = app.cast.call_raw(chain, contract, signature, *tokens[3:])
+        return {
+            "command": "call",
+            "chain": app.network_label(chain),
+            "contract": contract,
+            "signature": signature,
+            "result": value,
+        }
+
+    # Block header lookup.
+    if tokens[0] == "block" and len(tokens) in {1, 2}:
+        reference = tokens[1] if len(tokens) == 2 else "latest"
+        if not BLOCK_REFERENCE_RE.fullmatch(reference):
+            raise WalletCliError(
+                "Block must be a decimal or 0x-prefixed number, or "
+                "latest/earliest/pending/finalized/safe."
+            )
+        state = app.config()
+        chain = app.active_chain(state)
+        data = app._parse_json_result(
+            app.cast.network(chain, ["block", reference], json_output=True), "block"
+        )
+        return _block_result(app, chain, reference, data)
+
+    # Local address book; names resolve in send/balance/token commands.
+    if tokens[0] == "contact":
+        if len(tokens) < 2:
+            raise WalletCliError(
+                "Usage: contact add NAME ADDRESS | contact list | contact remove NAME."
+            )
+        action = tokens[1]
+        state = app.config()
+        if action == "add" and len(tokens) == 4:
+            name = validate_contact_name(tokens[2])
+            address = app.resolve_address(tokens[3], state, "contact address")
+
+            def add_contact(config: dict[str, Any]) -> None:
+                config["contacts"][name] = address
+
+            app.store.update(add_contact)
+            return {"command": "contact add", "name": name, "address": address}
+        if action == "list" and len(tokens) == 2:
+            contacts = [
+                {"name": name, "address": address}
+                for name, address in sorted(state["contacts"].items())
+            ]
+            return {"command": "contact list", "contacts": contacts}
+        if action == "remove" and len(tokens) == 3:
+            name = validate_contact_name(tokens[2])
+            if name not in state["contacts"]:
+                raise WalletCliError(f"Contact '{name}' was not found.")
+
+            def remove_contact(config: dict[str, Any]) -> None:
+                config["contacts"].pop(name, None)
+
+            app.store.update(remove_contact)
+            return {"command": "contact remove", "name": name}
+        raise WalletCliError(
+            "Usage: contact add NAME ADDRESS | contact list | contact remove NAME."
+        )
 
     # Native coin transfer: estimate, confirm, sign, and broadcast.
     if tokens[0] == "send":
@@ -570,14 +810,15 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
         args = [token for token in tokens[1:] if token not in {"--dry-run", "--yes"}]
         if len(args) != 2 or dry_run and yes:
             raise WalletCliError("Usage: send DESTINATION AMOUNT [--dry-run | --yes].")
-        destination = validate_address(args[0], "destination")
-        raw_amount = to_base_units(args[1], 18)
         state = app.config()
+        destination = app.resolve_address(args[0], state, "destination")
+        raw_amount = to_base_units(args[1], 18)
         chain = app.active_chain(state)
         alias, metadata, keystore = app.wallet(state=state)
         amount = format_units(raw_amount, 18)
         if not dry_run:
             app.require_terminal("send")
+            keystore = app.require_signing_wallet(alias, keystore, "send")
         gas = app.cast.estimate(
             chain, [destination, "--from", metadata["address"], "--value", f"{raw_amount}wei"]
         )
@@ -625,6 +866,19 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             raise WalletCliError(
                 f"Transaction was mined with a failed status; transaction hash: {tx_hash}."
             )
+        app.record_transaction(
+            {
+                "hash": tx_hash,
+                "kind": "native",
+                "chain": chain.name,
+                "chain_id": chain.chain_id,
+                "from": metadata["address"],
+                "to": destination,
+                "amount": amount,
+                "amount_base_units": str(raw_amount),
+                "timestamp": int(time.time()),
+            }
+        )
         return {
             "command": "send",
             "dry_run": False,
@@ -640,15 +894,17 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             "transaction_hash": tx_hash,
         }
 
-    # ERC-20 balance and transfer.
-    if tokens[0] == "token" and len(tokens) >= 3:
+    # ERC-20 balances, transfers, metadata, saved list, and allowances.
+    if tokens[0] == "token":
+        if len(tokens) < 2:
+            raise WalletCliError(TOKEN_USAGE)
         action = tokens[1]
         if action == "balance" and len(tokens) in {3, 4}:
             contract = validate_address(tokens[2], "token contract")
             state = app.config()
             chain = app.active_chain(state)
             owner = (
-                validate_address(tokens[3], "owner address")
+                app.resolve_address(tokens[3], state, "owner address")
                 if len(tokens) == 4
                 else app.wallet(state=state)[1]["address"]
             )
@@ -673,13 +929,14 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
                 raise WalletCliError(
                     "Usage: token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]."
                 )
-            contract = validate_address(args[0], "token contract")
-            destination = validate_address(args[1], "destination")
             state = app.config()
+            contract = validate_address(args[0], "token contract")
+            destination = app.resolve_address(args[1], state, "destination")
             chain = app.active_chain(state)
             alias, metadata, keystore = app.wallet(state=state)
             if not dry_run:
                 app.require_terminal("token send")
+                keystore = app.require_signing_wallet(alias, keystore, "send tokens")
             decimals = app.contract_uint(chain, contract, "decimals()(uint8)")
             if decimals > 255:
                 raise WalletCliError("Token contract returned an invalid decimals value.")
@@ -742,6 +999,20 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
                     "Token transaction was mined with a failed status; "
                     f"transaction hash: {tx_hash}."
                 )
+            app.record_transaction(
+                {
+                    "hash": tx_hash,
+                    "kind": "token",
+                    "chain": chain.name,
+                    "chain_id": chain.chain_id,
+                    "contract": contract,
+                    "from": metadata["address"],
+                    "to": destination,
+                    "amount": amount,
+                    "amount_raw": str(raw_amount),
+                    "timestamp": int(time.time()),
+                }
+            )
             return {
                 "command": "token send",
                 "dry_run": False,
@@ -758,11 +1029,194 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
                 "transaction": tx_result,
                 "transaction_hash": tx_hash,
             }
-        raise WalletCliError(
-            "Usage: token balance CONTRACT [ADDRESS] | token send CONTRACT "
-            "DESTINATION AMOUNT [--dry-run | --yes]."
-        )
+        if action == "info" and len(tokens) == 3:
+            contract = validate_address(tokens[2], "token contract")
+            state = app.config()
+            chain = app.active_chain(state)
+            decimals = app.contract_uint(chain, contract, "decimals()(uint8)")
+            if decimals > 255:
+                raise WalletCliError("Token contract returned an invalid decimals value.")
+            supply = app.contract_uint(chain, contract, "totalSupply()(uint256)")
+            return {
+                "command": "token info",
+                "chain": app.network_label(chain),
+                "contract": contract,
+                "name": app.contract_string(chain, contract, "name()(string)"),
+                "symbol": app.contract_string(chain, contract, "symbol()(string)"),
+                "decimals": decimals,
+                "total_supply_raw": str(supply),
+                "total_supply": format_units(supply, decimals),
+            }
+        if action == "list" and len(tokens) in {2, 3}:
+            state = app.config()
+            chain = app.active_chain(state)
+            owner = (
+                app.wallet(state=state)[1]["address"]
+                if len(tokens) == 2
+                else app.resolve_address(tokens[2], state, "owner address")
+            )
+            return _token_list(app, chain, state, owner)
+        if action == "add":
+            if len(tokens) not in {3, 4}:
+                raise WalletCliError("Usage: token add CONTRACT [SYMBOL].")
+            contract = validate_address(tokens[2], "token contract")
+            state = app.config()
+            chain = app.active_chain(state)
+            symbol = validate_symbol(tokens[3]) if len(tokens) == 4 else None
+            if symbol is None:
+                try:
+                    symbol = validate_symbol(
+                        app.contract_string(chain, contract, "symbol()(string)")
+                    )
+                except (FoundryError, WalletCliError):
+                    symbol = None
 
+            def add_token(config: dict[str, Any]) -> None:
+                config["tokens"].setdefault(chain.name, {})[contract.lower()] = symbol
+
+            app.store.update(add_token)
+            return {
+                "command": "token add",
+                "chain": app.network_label(chain),
+                "contract": contract,
+                "symbol": symbol,
+            }
+        if action == "remove" and len(tokens) == 3:
+            contract = validate_address(tokens[2], "token contract")
+            state = app.config()
+            chain = app.active_chain(state)
+            key = contract.lower()
+            if key not in state["tokens"].get(chain.name, {}):
+                raise WalletCliError(
+                    f"Token '{contract}' is not saved on {app.network_label(chain)}."
+                )
+
+            def remove_token(config: dict[str, Any]) -> None:
+                config["tokens"].get(chain.name, {}).pop(key, None)
+
+            app.store.update(remove_token)
+            return {
+                "command": "token remove",
+                "chain": app.network_label(chain),
+                "contract": contract,
+            }
+        if action == "allowance" and len(tokens) in {4, 5}:
+            contract = validate_address(tokens[2], "token contract")
+            state = app.config()
+            chain = app.active_chain(state)
+            spender = app.resolve_address(tokens[3], state, "spender address")
+            owner = (
+                app.resolve_address(tokens[4], state, "owner address")
+                if len(tokens) == 5
+                else app.wallet(state=state)[1]["address"]
+            )
+            decimals = app.contract_uint(chain, contract, "decimals()(uint8)")
+            if decimals > 255:
+                raise WalletCliError("Token contract returned an invalid decimals value.")
+            raw = app.contract_uint(
+                chain, contract, "allowance(address,address)(uint256)", owner, spender
+            )
+            return {
+                "command": "token allowance",
+                "chain": app.network_label(chain),
+                "contract": contract,
+                "owner": owner,
+                "spender": spender,
+                "decimals": decimals,
+                "allowance_raw": str(raw),
+                "allowance": format_units(raw, decimals),
+            }
+        if action == "revoke":
+            dry_run = "--dry-run" in tokens
+            yes = "--yes" in tokens
+            args = [token for token in tokens[2:] if token not in {"--dry-run", "--yes"}]
+            if len(args) != 2 or dry_run and yes:
+                raise WalletCliError("Usage: token revoke CONTRACT SPENDER [--dry-run | --yes].")
+            state = app.config()
+            contract = validate_address(args[0], "token contract")
+            spender = app.resolve_address(args[1], state, "spender address")
+            chain = app.active_chain(state)
+            alias, metadata, keystore = app.wallet(state=state)
+            if not dry_run:
+                app.require_terminal("token revoke")
+                keystore = app.require_signing_wallet(alias, keystore, "revoke approvals")
+            signature = "approve(address,uint256)"
+            app.simulate_erc20_approve(chain, contract, metadata["address"], spender, 0)
+            gas = app.cast.estimate(
+                chain,
+                [contract, signature, spender, "0", "--from", metadata["address"]],
+            )
+            if dry_run:
+                return {
+                    "command": "token revoke",
+                    "dry_run": True,
+                    "chain": app.network_label(chain),
+                    "chain_id": chain.chain_id,
+                    "contract": contract,
+                    "from_wallet": alias,
+                    "from": metadata["address"],
+                    "spender": spender,
+                    "estimated_gas": gas,
+                }
+            if not yes:
+                answer = app.input_fn(
+                    f"Revoke {alias}'s approval for {spender} on {app.network_label(chain)} "
+                    f"(chain ID {chain.chain_id})?\n"
+                    f"  contract {contract}\n"
+                    f"  estimated gas {gas}\n"
+                    "Type 'yes' to continue: "
+                )
+                if answer.strip().lower() != "yes":
+                    raise WalletCliError("Transaction cancelled.")
+            sys.stderr.write(
+                "Foundry will prompt for the selected keystore passphrase; input is hidden.\n"
+            )
+            output = app.cast.send(
+                chain,
+                [
+                    contract,
+                    signature,
+                    spender,
+                    "0",
+                    "--from",
+                    metadata["address"],
+                    "--keystore",
+                    str(keystore),
+                ],
+            )
+            tx_result, tx_hash, receipt_status = _parse_send_receipt(app, output, "token")
+            if receipt_status == 0:
+                raise WalletCliError(
+                    "Token approval transaction was mined with a failed status; "
+                    f"transaction hash: {tx_hash}."
+                )
+            app.record_transaction(
+                {
+                    "hash": tx_hash,
+                    "kind": "revoke",
+                    "chain": chain.name,
+                    "chain_id": chain.chain_id,
+                    "contract": contract,
+                    "from": metadata["address"],
+                    "spender": spender,
+                    "amount": "0",
+                    "timestamp": int(time.time()),
+                }
+            )
+            return {
+                "command": "token revoke",
+                "dry_run": False,
+                "chain": app.network_label(chain),
+                "chain_id": chain.chain_id,
+                "contract": contract,
+                "wallet": alias,
+                "from": metadata["address"],
+                "spender": spender,
+                "estimated_gas": gas,
+                "transaction": tx_result,
+                "transaction_hash": tx_hash,
+            }
+        raise WalletCliError(TOKEN_USAGE)
     # Transaction and receipt inspection.
     if tokens[0] == "tx" and len(tokens) == 3 and tokens[1] == "inspect":
         tx_hash = validate_tx_hash(tokens[2])
@@ -792,6 +1246,62 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             "pending": False,
         }
 
+    # Local transaction log for hashes this CLI broadcast.
+    if tokens[0] == "tx" and tokens[1:2] == ["list"] and len(tokens) in {2, 3}:
+        count = 20
+        if len(tokens) == 3:
+            try:
+                count = int(tokens[2], 10)
+            except ValueError as exc:
+                raise WalletCliError("Usage: tx list [COUNT].") from exc
+            if count < 1:
+                raise WalletCliError("Usage: tx list [COUNT].")
+        chain = app.active_chain()
+        records = [
+            record
+            for record in read_transactions(app.transactions_path, limit=TXLOG_LIMIT)
+            if record.get("chain_id") == chain.chain_id
+        ]
+        return {
+            "command": "tx list",
+            "chain": app.network_label(chain),
+            "count": count,
+            "transactions": records[-count:],
+        }
+
+    # Wait for a transaction receipt on the current network.
+    if tokens[0] == "tx" and tokens[1:2] == ["watch"] and len(tokens) == 3:
+        tx_hash = validate_tx_hash(tokens[2])
+        chain = app.active_chain()
+        app.cast.verify_chain(chain)
+        for attempt in range(app.watch_attempts):
+            output = app.cast.rpc(chain, "eth_getTransactionReceipt", tx_hash, verify=False)
+            try:
+                receipt = json.loads(output)
+            except json.JSONDecodeError as exc:
+                raise FoundryError("Foundry returned an invalid receipt response.") from exc
+            if receipt not in (None, "null"):
+                return {
+                    "command": "tx watch",
+                    "chain": app.network_label(chain),
+                    "transaction_hash": tx_hash,
+                    "receipt": receipt,
+                    "pending": False,
+                }
+            if attempt + 1 < app.watch_attempts:
+                app.sleep(app.watch_interval)
+        return {
+            "command": "tx watch",
+            "chain": app.network_label(chain),
+            "transaction_hash": tx_hash,
+            "receipt": None,
+            "pending": True,
+            "attempts": app.watch_attempts,
+        }
+
+    if tokens[0] == "tx":
+        raise WalletCliError("Usage: tx inspect HASH | tx list [COUNT] | tx watch HASH.")
+
     # Recent interactive shell commands.
     if tokens[0] == "history" and len(tokens) in {1, 2}:
         count = 20
@@ -805,6 +1315,96 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
         return {"command": "history", "count": count, "entries": app.history[-count:]}
 
     raise WalletCliError(f"Unknown command '{tokens[0]}'. Use 'help' to see available commands.")
+
+
+def _config_show(app: Application) -> dict[str, Any]:
+    """Return the resolved profile, network, storage, and wallet settings."""
+    state = app.config()
+    chain = app.active_chain(state)
+    alias = app.active_wallet_alias(state)
+    metadata = state["wallets"].get(alias) if alias else None
+    image_env = f"{app.profile.upper()}_WALLET_IMAGE"
+    return {
+        "command": "config show",
+        "profile": app.profile,
+        "config_dir": str(app.store.directory),
+        "version": state["version"],
+        "network": app.network_label(chain),
+        "chain_id": chain.chain_id,
+        "rpc_url": chain.rpc_url,
+        "wallet": alias,
+        "default_wallet": state["default_wallet"],
+        "address": metadata["address"] if metadata else None,
+        "watch_only": bool(metadata and "keystore" not in metadata),
+        "contact_count": len(state["contacts"]),
+        "saved_token_count": len(state["tokens"].get(chain.name, {})),
+        "image": os.environ.get(image_env),
+    }
+
+
+def _block_result(app: Application, chain: Chain, reference: str, data: object) -> dict[str, Any]:
+    """Normalize a Cast block response into JSON-friendly fields."""
+    if not isinstance(data, dict):
+        raise FoundryError("Foundry returned an invalid block response.")
+
+    def integer(key: str) -> int | None:
+        raw = data.get(key)
+        if isinstance(raw, bool):
+            return None
+        if isinstance(raw, int):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return int(raw, 16 if raw.startswith("0x") else 10)
+            except ValueError:
+                return None
+        return None
+
+    number = integer("number")
+    transactions = data.get("transactions")
+    return {
+        "command": "block",
+        "chain": app.network_label(chain),
+        "requested": reference,
+        "number": str(number) if number is not None else None,
+        "hash": data.get("hash") if isinstance(data.get("hash"), str) else None,
+        "timestamp": integer("timestamp"),
+        "gas_limit": _stringify(integer("gasLimit")),
+        "gas_used": _stringify(integer("gasUsed")),
+        "base_fee_per_gas": _stringify(integer("baseFeePerGas")),
+        "transaction_count": len(transactions) if isinstance(transactions, list) else None,
+    }
+
+
+def _stringify(value: int | None) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _token_list(
+    app: Application, chain: Chain, state: dict[str, Any], owner: str
+) -> dict[str, Any]:
+    """Read balances for the tokens saved for the active chain."""
+    entries = []
+    for contract, symbol in sorted(state["tokens"].get(chain.name, {}).items()):
+        decimals = app.contract_uint(chain, contract, "decimals()(uint8)")
+        if decimals > 255:
+            continue
+        raw = app.contract_uint(chain, contract, "balanceOf(address)(uint256)", owner)
+        entries.append(
+            {
+                "contract": contract,
+                "symbol": symbol,
+                "decimals": decimals,
+                "balance_raw": str(raw),
+                "balance": format_units(raw, decimals),
+            }
+        )
+    return {
+        "command": "token list",
+        "chain": app.network_label(chain),
+        "address": owner,
+        "tokens": entries,
+    }
 
 
 def _status(app: Application) -> dict[str, Any]:

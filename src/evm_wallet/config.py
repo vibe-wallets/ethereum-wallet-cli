@@ -18,6 +18,7 @@ from .errors import ConfigurationError, WalletCliError
 ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 KEYSTORE_FILE_RE = re.compile(r"^wallets/[0-9a-f]{32}$")
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+SYMBOL_MAX_LENGTH = 32
 
 
 def default_config_dir() -> Path:
@@ -32,7 +33,7 @@ def default_config_dir() -> Path:
 
 def new_config() -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 2,
         "default_chain": "ethereum",
         "current_chain": "ethereum",
         "default_wallet": None,
@@ -42,6 +43,8 @@ def new_config() -> dict[str, Any]:
             for name, chain in BUILTIN_CHAINS.items()
         },
         "wallets": {},
+        "contacts": {},
+        "tokens": {},
     }
 
 
@@ -52,6 +55,41 @@ def validate_alias(alias: str) -> str:
             "digits, '.', '_' or '-' (up to 64 characters)."
         )
     return alias
+
+
+def validate_contact_name(name: str) -> str:
+    if not ALIAS_RE.fullmatch(name):
+        raise WalletCliError(
+            "Contact names must start with a letter or digit and contain only letters, "
+            "digits, '.', '_' or '-' (up to 64 characters)."
+        )
+    return name
+
+
+def validate_symbol(symbol: str | None) -> str | None:
+    if symbol is None:
+        return None
+    text = symbol.strip()
+    if not text or len(text) > SYMBOL_MAX_LENGTH or any(character < " " for character in text):
+        raise WalletCliError(
+            f"Token symbols must be 1 to {SYMBOL_MAX_LENGTH} printable characters."
+        )
+    return text
+
+
+def _migrate_document(document: object) -> object:
+    """Upgrade a version 1 document to version 2 with empty contacts and tokens."""
+    if (
+        isinstance(document, dict)
+        and type(document.get("version")) is int
+        and document.get("version") == 1
+    ):
+        migrated = dict(document)
+        migrated["version"] = 2
+        migrated.setdefault("contacts", {})
+        migrated.setdefault("tokens", {})
+        return migrated
+    return document
 
 
 class ConfigStore:
@@ -115,7 +153,7 @@ class ConfigStore:
             raise ConfigurationError(
                 "Cannot read config.json; the file is malformed or inaccessible."
             ) from exc
-        return self._validate_document(data)
+        return self._validate_document(_migrate_document(data))
 
     def update(self, change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         """Apply a change under an exclusive lock and write config.json atomically."""
@@ -211,9 +249,9 @@ class ConfigStore:
         if (
             not isinstance(document, dict)
             or type(document.get("version")) is not int
-            or document.get("version") != 1
+            or document.get("version") != 2
         ):
-            raise ConfigurationError("config.json must be an object with version 1.")
+            raise ConfigurationError("config.json must be an object with version 2.")
         expected = {
             "version",
             "default_chain",
@@ -222,15 +260,23 @@ class ConfigStore:
             "current_wallet",
             "chains",
             "wallets",
+            "contacts",
+            "tokens",
         }
         if set(document) != expected:
             raise ConfigurationError("config.json contains missing or unknown top-level fields.")
         chains = document["chains"]
         wallets = document["wallets"]
-        if not isinstance(chains, dict) or not isinstance(wallets, dict):
-            raise ConfigurationError("config.json chains and wallets must be objects.")
+        contacts = document["contacts"]
+        tokens = document["tokens"]
+        if not all(isinstance(section, dict) for section in (chains, wallets, contacts, tokens)):
+            raise ConfigurationError(
+                "config.json chains, wallets, contacts, and tokens must be objects."
+            )
         ConfigStore._validate_chains(chains)
         ConfigStore._validate_wallets(wallets)
+        ConfigStore._validate_contacts(contacts)
+        ConfigStore._validate_tokens(tokens, chains)
         for key in ("default_chain", "current_chain"):
             name = document[key]
             if not isinstance(name, str) or name not in chains:
@@ -258,13 +304,41 @@ class ConfigStore:
                 or not isinstance(metadata, dict)
             ):
                 raise ConfigurationError("config.json contains an invalid wallet alias entry.")
-            if set(metadata) != {"keystore", "address"}:
+            # A watch-only wallet records just an address; a signing wallet also
+            # records its encrypted keystore path.
+            if set(metadata) not in ({"address"}, {"keystore", "address"}):
                 raise ConfigurationError(
-                    f"Wallet '{alias}' metadata must contain keystore and address only."
+                    f"Wallet '{alias}' metadata must contain address, with keystore for a signing wallet."
                 )
-            keystore = metadata["keystore"]
-            if not isinstance(keystore, str) or not KEYSTORE_FILE_RE.fullmatch(keystore):
-                raise ConfigurationError(f"Wallet '{alias}' has an invalid keystore path.")
+            if "keystore" in metadata:
+                keystore = metadata["keystore"]
+                if not isinstance(keystore, str) or not KEYSTORE_FILE_RE.fullmatch(keystore):
+                    raise ConfigurationError(f"Wallet '{alias}' has an invalid keystore path.")
             address = metadata["address"]
             if not isinstance(address, str) or not ADDRESS_RE.fullmatch(address):
                 raise ConfigurationError(f"Wallet '{alias}' has an invalid address.")
+
+    @staticmethod
+    def _validate_contacts(contacts: dict[str, Any]) -> None:
+        for name, address in contacts.items():
+            if not isinstance(name, str) or not ALIAS_RE.fullmatch(name):
+                raise ConfigurationError("config.json contains an invalid contact name.")
+            if not isinstance(address, str) or not ADDRESS_RE.fullmatch(address):
+                raise ConfigurationError(f"Contact '{name}' has an invalid address.")
+
+    @staticmethod
+    def _validate_tokens(tokens: dict[str, Any], chains: dict[str, Any]) -> None:
+        for chain_name, entries in tokens.items():
+            if not isinstance(chain_name, str) or chain_name not in chains:
+                raise ConfigurationError("config.json saved tokens refer to an unknown chain.")
+            if not isinstance(entries, dict):
+                raise ConfigurationError("config.json saved tokens must map a chain to addresses.")
+            for address, symbol in entries.items():
+                if not isinstance(address, str) or not ADDRESS_RE.fullmatch(address):
+                    raise ConfigurationError("config.json contains an invalid saved token address.")
+                if symbol is not None and (
+                    not isinstance(symbol, str)
+                    or not symbol.strip()
+                    or len(symbol) > SYMBOL_MAX_LENGTH
+                ):
+                    raise ConfigurationError("config.json contains an invalid saved token symbol.")

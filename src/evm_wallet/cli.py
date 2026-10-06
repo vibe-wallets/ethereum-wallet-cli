@@ -64,6 +64,11 @@ def _parser(
         dest="json_output",
         help="print one-shot command output as JSON",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show advanced commands and details",
+    )
     parser.add_argument("--version", action="version", version=f"{prog} 0.1.0")
     return parser
 
@@ -103,6 +108,8 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
                     markers.append("default")
                 if wallet["current"]:
                     markers.append("current")
+                if wallet.get("watch_only"):
+                    markers.append("watch")
                 tags = f"[{', '.join(markers)}]" if markers else ""
                 rows.append([wallet["alias"], wallet["address"], tags])
             print(section_title("WALLETS", stream=output), file=output)
@@ -162,6 +169,60 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
         ]
         print(section_title("TOKEN BALANCE", stream=output), file=output)
         print(key_value_rows(rows, stream=output), file=output)
+    elif command == "token info":
+        rows = [
+            ("Name", str(result["name"] or "unknown")),
+            ("Symbol", str(result["symbol"] or "unknown")),
+            ("Contract", result["contract"]),
+            ("Decimals", str(result["decimals"])),
+            ("Total supply", result["total_supply"], "emphasis"),
+        ]
+        print(section_title("TOKEN INFO", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
+    elif command == "token list":
+        tokens = result.get("tokens", [])
+        print(section_title("SAVED TOKENS", stream=output), file=output)
+        if not tokens:
+            message = "No saved tokens for this network. Use 'token add CONTRACT'."
+            print(color(message, "muted", stream=output), file=output)
+        else:
+            rows = [
+                [str(token["symbol"] or "-"), token["contract"], token["balance"]]
+                for token in tokens
+            ]
+            print(table(rows, ["SYMBOL", "CONTRACT", "BALANCE"], stream=output), file=output)
+    elif command == "token add":
+        saved = f"Token '{result['contract']}' saved"
+        symbol = f" as {result['symbol']}" if result.get("symbol") else ""
+        print(f"{color(saved, 'success', stream=output)}{symbol}.", file=output)
+    elif command == "token remove":
+        removed = f"Token '{result['contract']}' forgotten"
+        print(f"{color(removed, 'success', stream=output)}.", file=output)
+    elif command == "token allowance":
+        rows = [
+            ("Contract", result["contract"]),
+            ("Owner", result["owner"]),
+            ("Spender", result["spender"]),
+            ("Network", network_label(str(result["chain"]), stream=output)),
+            ("Allowance", result["allowance"], "emphasis"),
+            ("Exact units", str(result["allowance_raw"])),
+        ]
+        print(section_title("TOKEN ALLOWANCE", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
+    elif command == "token revoke" and result.get("dry_run"):
+        preview = action_preview(
+            "REVOKE APPROVAL · TRANSACTION PREVIEW",
+            [
+                ("Network", network_label(str(result["chain"]), stream=output)),
+                ("From", f"{result['from_wallet']} ({result['from']})"),
+                ("Contract", result["contract"]),
+                ("Spender", result["spender"]),
+                ("New allowance", "0", "emphasis"),
+                ("Estimated gas", str(result["estimated_gas"])),
+            ],
+            stream=output,
+        )
+        print(preview, file=output)
     elif command == "nonce":
         rows = [
             ("Address", result["address"]),
@@ -175,13 +236,101 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             ("Network", network_label(str(result["chain"]), stream=output)),
             ("Chain ID", str(result["chain_id"])),
             ("Gas price", f"{result['gas_price_gwei']} gwei", "emphasis"),
+            (
+                "Base fee",
+                f"{result['base_fee_gwei']} gwei"
+                if result.get("base_fee_gwei") is not None
+                else color("unavailable", "muted", stream=output),
+            ),
             ("Exact wei", str(result["gas_price_wei"])),
         ]
         print(section_title("GAS", stream=output), file=output)
         print(key_value_rows(rows, stream=output), file=output)
-    elif command == "send" and result.get("dry_run"):
+    elif command == "config show":
+        rows = [
+            ("Profile", result["profile"]),
+            ("Config dir", result["config_dir"]),
+            ("Network", network_label(str(result["network"]), stream=output)),
+            ("Chain ID", str(result["chain_id"])),
+            ("RPC URL", result["rpc_url"]),
+            (
+                "Wallet",
+                f"{result['wallet']} ({result['address']})"
+                if result.get("wallet")
+                else color("none selected", "warning", stream=output),
+            ),
+            ("Default wallet", str(result["default_wallet"] or "-")),
+            ("Watch only", "yes" if result["watch_only"] else "no"),
+            ("Contacts", str(result["contact_count"])),
+            ("Saved tokens", str(result["saved_token_count"])),
+        ]
+        print(section_title("CONFIG", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
+    elif command == "checksum":
+        print(result["checksum"], file=output)
+    elif command == "call":
+        rows = [
+            ("Contract", result["contract"]),
+            ("Signature", result["signature"]),
+            ("Network", network_label(str(result["chain"]), stream=output)),
+            ("Result", result["result"], "emphasis"),
+        ]
+        print(section_title("CALL", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
+    elif command == "block":
+        gas = (
+            f"{result['gas_used']} / {result['gas_limit']}"
+            if result.get("gas_used") is not None and result.get("gas_limit") is not None
+            else "unknown"
+        )
+        rows = [
+            ("Number", str(result["number"] or "unknown")),
+            ("Hash", str(result["hash"] or "unknown")),
+            (
+                "Timestamp",
+                str(result["timestamp"]) if result["timestamp"] is not None else "unknown",
+            ),
+            (
+                "Transactions",
+                str(result["transaction_count"])
+                if result["transaction_count"] is not None
+                else "unknown",
+            ),
+            ("Gas used", gas),
+            (
+                "Base fee",
+                f"{result['base_fee_per_gas']} wei"
+                if result.get("base_fee_per_gas") is not None
+                else "unavailable",
+            ),
+        ]
+        print(section_title("BLOCK", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
+    elif command == "contact list":
+        contacts = result.get("contacts", [])
+        print(section_title("CONTACTS", stream=output), file=output)
+        if not contacts:
+            print(
+                color("No contacts saved. Use 'contact add NAME ADDRESS'.", "muted", stream=output),
+                file=output,
+            )
+        else:
+            rows = [[contact["name"], contact["address"]] for contact in contacts]
+            print(table(rows, ["NAME", "ADDRESS"], stream=output), file=output)
+    elif command == "contact add":
+        saved = f"Contact '{result['name']}' saved"
+        print(f"{color(saved, 'success', stream=output)} at {result['address']}.", file=output)
+    elif command == "contact remove":
+        removed = f"Contact '{result['name']}' removed"
+        print(f"{color(removed, 'success', stream=output)}.", file=output)
+    elif command in {"send", "estimate"} and result.get("dry_run"):
+        title = (
+            "ESTIMATE NATIVE TRANSFER"
+            if command == "estimate"
+            else "SEND NATIVE · TRANSACTION PREVIEW"
+        )
         preview = action_preview(
-            "SEND NATIVE · TRANSACTION PREVIEW",
+            title,
             [
                 ("Network", network_label(str(result["chain"]), stream=output)),
                 ("From", f"{result['from_wallet']} ({result['from']})"),
@@ -217,6 +366,34 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             print(json.dumps(result["transaction"], indent=2, sort_keys=True), file=output)
             print(section_title("RECEIPT", stream=output), file=output)
             print(json.dumps(result["receipt"], indent=2, sort_keys=True), file=output)
+    elif command == "tx list":
+        records = result.get("transactions", [])
+        print(section_title("RECORDED TRANSACTIONS", stream=output), file=output)
+        if not records:
+            message = (
+                "No recorded transactions for this network; only sends from this CLI are logged."
+            )
+            print(color(message, "muted", stream=output), file=output)
+        else:
+            rows = [
+                [
+                    str(record.get("hash", "")),
+                    str(record.get("kind", "tx")),
+                    str(record.get("to") or record.get("spender") or ""),
+                    str(record.get("amount", "")),
+                ]
+                for record in reversed(records)
+            ]
+            print(table(rows, ["HASH", "KIND", "TO/SPENDER", "AMOUNT"], stream=output), file=output)
+    elif command == "tx watch":
+        if result["pending"]:
+            message = (
+                f"Transaction {result['transaction_hash']} is still pending on {result['chain']}."
+            )
+            print(color(message, "warning", stream=output), file=output)
+        else:
+            print(f"Transaction: {result['transaction_hash']} on {result['chain']}", file=output)
+            print(json.dumps(result["receipt"], indent=2, sort_keys=True), file=output)
     elif command == "history":
         entries = result.get("entries", [])
         print(section_title("HISTORY", stream=output), file=output)
@@ -237,10 +414,35 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
         rows = [
             ("Alias", result["alias"]),
             ("Address", result["address"]),
-            ("Encrypted keystore", result["keystore"]),
+            (
+                "Encrypted keystore",
+                result["keystore"] if result.get("keystore") else "watch-only",
+            ),
         ]
         print(section_title("WALLET", stream=output), file=output)
         print(key_value_rows(rows, stream=output), file=output)
+    elif command == "wallet watch":
+        watched = f"Wallet '{result['alias']}' is watch-only"
+        print(
+            f"{color(watched, 'success', stream=output)} at {result['address']}.",
+            file=output,
+        )
+    elif command == "wallet verify":
+        wallets = result.get("wallets", [])
+        print(section_title("WALLET HEALTH", stream=output), file=output)
+        if not wallets:
+            print(color("No wallets to verify.", "muted", stream=output), file=output)
+        else:
+            rows = [
+                [
+                    entry["alias"],
+                    entry["address"],
+                    "watch-only" if entry["watch_only"] else "keystore",
+                    "ok" if entry["valid"] else f"invalid: {entry.get('error', '')}",
+                ]
+                for entry in wallets
+            ]
+            print(table(rows, ["ALIAS", "ADDRESS", "TYPE", "STATUS"], stream=output), file=output)
     elif command == "wallet rename":
         renamed = f"Wallet '{result['old_alias']}' renamed to '{result['alias']}'"
         print(
@@ -258,14 +460,30 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             f"{color(selected, 'success', stream=output)} at {result['address']}.",
             file=output,
         )
-    elif command in {"send", "token send"}:
-        action = "Transaction" if command == "send" else "Token transaction"
-        rows = [
-            ("Wallet", f"{result['wallet']} ({result['from']})"),
-            ("To", result["to"]),
-            ("Amount", result["amount"], "emphasis"),
-            ("Estimated gas", str(result.get("estimated_gas") or "unknown")),
-        ]
+    elif command in {"send", "token send", "token revoke"}:
+        if command == "send":
+            action = "Transaction"
+        elif command == "token send":
+            action = "Token transaction"
+        else:
+            action = "Approval revocation"
+        rows = [("Wallet", f"{result['wallet']} ({result['from']})")]
+        if command == "token revoke":
+            rows.extend(
+                [
+                    ("Contract", result["contract"]),
+                    ("Spender", result["spender"]),
+                    ("New allowance", "0", "emphasis"),
+                ]
+            )
+        else:
+            rows.extend(
+                [
+                    ("To", result["to"]),
+                    ("Amount", result["amount"], "emphasis"),
+                ]
+            )
+        rows.append(("Estimated gas", str(result.get("estimated_gas") or "unknown")))
         print(
             format_transaction_receipt(
                 action=action,
@@ -477,6 +695,7 @@ def main(
             profile=profile,
             network_name=network_name,
         )
+        app.verbose = bool(namespace.verbose)
         app.active_chain()
     except WalletCliError as exc:
         _print_error(str(exc), json_output=json_output)

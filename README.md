@@ -83,6 +83,32 @@ The top-level options are `-c 'COMMAND'` / `--command 'COMMAND'` for a one-shot 
 
 `wallet use ALIAS` selects the wallet for the current session; `wallet default ALIAS` stores the profile's saved wallet default. Wallet defaults are separate between the Ethereum and Monad profiles. `wallet rename` renames a local alias, and `wallet delete` removes a local encrypted keystore after confirmation; neither touches on-chain funds.
 
+The command list above is the common set. Advanced commands are hidden from `help`
+by default; run `help --verbose`, or start the shell with `--verbose`, to show them:
+
+```text
+config show
+call CONTRACT SIGNATURE [ARGS...]
+checksum ADDRESS
+block [NUMBER|latest]
+contact add NAME ADDRESS
+contact list
+contact remove NAME
+estimate DESTINATION AMOUNT
+token info CONTRACT
+token list [ADDRESS]
+token add CONTRACT [SYMBOL]
+token remove CONTRACT
+token allowance CONTRACT SPENDER [OWNER]
+token revoke CONTRACT SPENDER [--dry-run | --yes]
+tx list [COUNT]
+tx watch HASH
+wallet watch ALIAS ADDRESS
+wallet verify [ALIAS]
+```
+
+Saved contacts, saved tokens, and the local transaction log are public metadata kept in the profile's config directory. `wallet watch` adds a read-only address that can be queried but never signs.
+
 In the interactive shell, Tab completes commands, subcommands, networks, flags, and wallet aliases, and `history` shows recent commands. Run `help TOPIC` (for example `help wallet` or `help send`) for focused usage. History is stored as plain command text in the profile's config directory.
 
 After each command succeeds or fails, the CLI prints the underlying Foundry Cast invocations to standard error, including chain checks, simulations, and sends. Local commands explicitly report when no external command ran. Custom and local RPC URLs are masked in the trace; bundled public endpoint URLs remain visible. Private keys and passphrases are never printed. With `--json`, standard output remains the JSON result; standard error may contain the trace or error details.

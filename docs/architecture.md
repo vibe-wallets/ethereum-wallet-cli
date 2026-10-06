@@ -10,7 +10,7 @@ For read operations, the CLI obtains the selected chain and RPC URL, then invoke
 
 Each external invocation is recorded as shell-quoted argv and printed to standard error after the command result or error. If a command stays local, the wrapper prints `[wrapper] No external command ran (local command).` Custom and local RPC URLs are replaced with `<redacted-rpc-url>` in the trace; bundled public RPC endpoints remain visible. JSON result output stays on standard output.
 
-The local configuration stores chain definitions, wallet aliases, and public addresses. Each alias points to a randomly named encrypted keystore in the `wallets/` directory. Ethereum and Monad use different config directories, so aliases and keys do not cross between entrypoints. Random filenames avoid making wallet aliases part of the keystore path; configuration itself is plaintext and should be protected.
+The local configuration stores chain definitions, wallet aliases, saved contacts, saved tokens, and public addresses. Each signing alias points to a randomly named encrypted keystore in the `wallets/` directory; a watch-only alias stores only an address. Ethereum and Monad use different config directories, so aliases and keys do not cross between entrypoints. Random filenames avoid making wallet aliases part of the keystore path; configuration itself is plaintext and should be protected. The CLI also keeps an append-only local transaction log (`transactions.jsonl`) of hashes it broadcast and a plain-text shell history file, because EVM RPC endpoints cannot enumerate a wallet's history.
 
 ## Extending EVM support
 

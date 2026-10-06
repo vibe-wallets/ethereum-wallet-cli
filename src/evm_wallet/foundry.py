@@ -165,17 +165,24 @@ class CastClient:
             )
 
     def network(
-        self, chain: Chain, args: list[str], *, json_output: bool = False, interactive: bool = False
+        self,
+        chain: Chain,
+        args: list[str],
+        *,
+        json_output: bool = False,
+        interactive: bool = False,
+        verify: bool = True,
     ) -> str:
         """Verify the chain, then run a command against its RPC endpoint."""
-        self.verify_chain(chain)
+        if verify:
+            self.verify_chain(chain)
         command = [*args, "--rpc-url", chain.rpc_url]
         if json_output:
             command.append("--json")
         return self.run(command, interactive=interactive)
 
-    def rpc(self, chain: Chain, method: str, *params: str) -> str:
-        return self.network(chain, ["rpc", method, *params])
+    def rpc(self, chain: Chain, method: str, *params: str, verify: bool = True) -> str:
+        return self.network(chain, ["rpc", method, *params], verify=verify)
 
     def rpc_integer(self, chain: Chain, method: str, *params: str, label: str) -> int:
         """Call an RPC method and parse its unsigned integer result."""

@@ -1,8 +1,10 @@
 """Human-readable command index and focused help topics.
 
-``help`` with no topic prints the index; ``help TOPIC`` prints one focused page.
-Section headings are uppercase so :func:`evm_wallet.human.style_help` can style
-them on a terminal without changing the plain text.
+``help`` prints the common command index; ``help --verbose`` (or a session started
+with ``--verbose``) additionally lists the advanced commands. ``help TOPIC``
+prints one focused page. Section headings are uppercase so
+:func:`evm_wallet.human.style_help` can style them on a terminal without changing
+the plain text.
 """
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ INSPECTION
   history [COUNT]                  Show recent shell commands
 
 UTILITIES
-  help [TOPIC]                     Show this index or one focused topic
+  help [TOPIC] [--verbose]         Show this index or one focused topic
   clear                            Clear the screen
   exit | quit                      Leave the shell
 
@@ -48,6 +50,30 @@ Amounts are exact decimal strings. Sends require an interactive terminal to unlo
 the encrypted keystore; --yes skips the transaction confirmation prompt.
 Run `help TOPIC` for focused help: wallet, chain, status, send, token, tx,
 address, balance, nonce, gas, history.
+Advanced commands are hidden; run `help --verbose` to show them.
+"""
+
+ADVANCED_INDEX = """
+ADVANCED
+  config show                      Show resolved profile, network, and storage
+  call CONTRACT SIGNATURE [ARGS...] Read a view function on a contract
+  checksum ADDRESS                 EIP-55 checksum an address
+  block [NUMBER|latest]            Show a block header
+  contact add NAME ADDRESS         Save a local address-book entry
+  contact list | remove NAME       List or remove contacts
+  estimate DESTINATION AMOUNT      Gas estimate only, without signing
+  token info CONTRACT              Show ERC-20 name, symbol, decimals, supply
+  token list [ADDRESS]             Show balances for saved tokens
+  token add CONTRACT [SYMBOL]      Save a token for this network
+  token remove CONTRACT            Forget a saved token
+  token allowance CONTRACT SPENDER [OWNER]
+                                   Show an ERC-20 allowance
+  token revoke CONTRACT SPENDER [--dry-run | --yes]
+                                   Reset an ERC-20 allowance to zero
+  tx list [COUNT]                  Show transactions this CLI broadcast
+  tx watch HASH                    Wait for a transaction receipt
+  wallet watch ALIAS ADDRESS       Track an address without a keystore
+  wallet verify [ALIAS]            Re-check local wallet files
 """
 
 HELP_TOPICS: dict[str, str] = {
@@ -96,8 +122,8 @@ status
 
 send DESTINATION AMOUNT [--dry-run | --yes]
 
-DESTINATION is a 0x-prefixed 20-byte address and AMOUNT is an exact decimal
-string such as 0.01. The command estimates gas first:
+DESTINATION is a 0x-prefixed 20-byte address or a saved contact name, and AMOUNT
+is an exact decimal string such as 0.01. The command estimates gas first:
   --dry-run  print the estimate and do not sign or broadcast
   (default)  ask for confirmation, then sign through Foundry's hidden prompt
   --yes      skip only the confirmation prompt; signing still needs a terminal
@@ -132,6 +158,7 @@ address [ALIAS]
 
 balance [ADDRESS]
   Read the native coin balance for ADDRESS, or for the selected wallet by default.
+  ADDRESS may also be a saved contact name.
 """,
     "nonce": """NONCE
 
@@ -142,8 +169,8 @@ nonce [ADDRESS]
     "gas": """GAS
 
 gas
-  Show the current gas price reported by the selected network's RPC endpoint, in
-  wei and gwei. It is an estimate, not a fee guarantee.
+  Show the current gas price and base fee reported by the selected network's RPC
+  endpoint, in wei and gwei. They are estimates, not a fee guarantee.
 """,
     "history": """HISTORY
 
@@ -154,18 +181,119 @@ history [COUNT]
 """,
 }
 
+# Extra help appended to a base topic only when verbose mode is on.
+ADVANCED_EXTRA: dict[str, str] = {
+    "wallet": """
+wallet watch ALIAS ADDRESS
+  Track an address without a keystore. A watch-only wallet can be read from but
+  never signs.
+wallet verify [ALIAS]
+  Re-check that each local keystore is readable, consistent, and correctly
+  permissioned. Useful before relying on a backup.
+""",
+    "token": """
+token info CONTRACT
+  Show the token's name, symbol, decimals, and total supply.
+token list [ADDRESS]
+  Read balances for the tokens saved on this network. ADDRESS defaults to the
+  selected wallet.
+token add CONTRACT [SYMBOL]
+  Save a token for the current network so `token list` can show it. The symbol is
+  read from the contract when omitted.
+token remove CONTRACT
+  Forget a saved token.
+token allowance CONTRACT SPENDER [OWNER]
+  Show how many token units SPENDER may move from OWNER's account.
+token revoke CONTRACT SPENDER [--dry-run | --yes]
+  Reset an allowance to zero. This is a real transaction and always asks before
+  signing unless --yes is given.
+""",
+    "tx": """
+tx list [COUNT]
+  Show transactions this CLI broadcast on the current network, newest last.
+  RPC endpoints cannot enumerate history, so only local sends are recorded.
+tx watch HASH
+  Poll until the transaction is mined, then show its receipt.
+""",
+}
 
-def help_text(topic: str | None = None) -> str:
-    """Return the command index or one focused help topic."""
+# Standalone topics for the advanced commands; ``help TOPIC`` needs verbose mode.
+ADVANCED_TOPICS: dict[str, str] = {
+    "config": """CONFIG
+
+config show
+  Show the resolved profile, network, chain ID, RPC URL, config directory, wallet,
+  watch-only status, and saved contact/token counts. It makes no network request.
+""",
+    "call": """CONTRACT CALL
+
+call CONTRACT SIGNATURE [ARGS...]
+
+Run a read-only view function, for example:
+
+  call 0xTokenContract "balanceOf(address)(uint256)" 0xWalletAddress
+  call 0xTokenContract "decimals()(uint8)"
+
+The result is printed as Cast returns it. This never signs or broadcasts.
+""",
+    "checksum": """CHECKSUM
+
+checksum ADDRESS
+  Print the EIP-55 mixed-case checksum form of a lowercase address. This is a
+  local operation and makes no network request.
+""",
+    "block": """BLOCK
+
+block [NUMBER|latest]
+  Show a block header: number, hash, timestamp, gas limit, gas used, base fee, and
+  transaction count. NUMBER may be decimal or 0x-prefixed; the default is latest.
+""",
+    "contact": """CONTACTS
+
+contact add NAME ADDRESS
+  Save an address-book entry. The address may be another contact's name.
+contact list
+  List saved contacts.
+contact remove NAME
+  Remove a contact.
+
+Saved contact names can be used wherever an address is expected, such as
+`send NAME 0.1` or `balance NAME`.
+""",
+    "estimate": """ESTIMATE
+
+estimate DESTINATION AMOUNT
+  Estimate gas for a native transfer without signing or broadcasting. It accepts
+  a contact name and behaves like `send DESTINATION AMOUNT --dry-run`.
+""",
+}
+
+_NO_TOPIC = "No detailed help is available for `{topic}`. Run `help` for the command list."
+_NEEDS_VERBOSE = (
+    "`{topic}` is an advanced command. Run `help --verbose` or start the shell with "
+    "`--verbose` to see its help."
+)
+
+
+def help_text(topic: str | None = None, *, verbose: bool = False) -> str:
+    """Return the command index or one focused help topic.
+
+    Advanced commands are only listed, and advanced-only topics only explained,
+    when ``verbose`` is true.
+    """
     if topic is None:
-        return HELP_INDEX
+        return HELP_INDEX + (ADVANCED_INDEX if verbose else "")
     normalized = topic.strip().lower()
-    return HELP_TOPICS.get(
-        normalized,
-        f"No detailed help is available for `{topic}`. Run `help` for the command list.",
-    )
+    if normalized in ADVANCED_TOPICS:
+        return ADVANCED_TOPICS[normalized] if verbose else _NEEDS_VERBOSE.format(topic=topic)
+    if normalized in HELP_TOPICS:
+        text = HELP_TOPICS[normalized]
+        if verbose:
+            text += ADVANCED_EXTRA.get(normalized, "")
+        return text
+    return _NO_TOPIC.format(topic=topic)
 
 
 def topic_names() -> list[str]:
-    """Return the sorted focused help topics, for completion and validation."""
-    return sorted(HELP_TOPICS)
+    """Return all help topic names, for completion and validation."""
+    return sorted(set(HELP_TOPICS) | set(ADVANCED_TOPICS))

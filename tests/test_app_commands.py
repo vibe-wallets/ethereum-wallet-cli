@@ -34,11 +34,17 @@ class FakeCastRunner:
         self.token_balance = 1_234_567_890_123_456_789
         self.nonce = 3
         self.gas_price = "1500000000\n"
+        self.base_fee = "1000000000\n"
+        self.allowance = 2_500_000
+        self.name = "Test Token"
+        self.symbol = "TT"
+        self.block_number = 16
         self.transfer_success = True
         self.send_status = "0x1"
         self.send_hash: str | None = TX_HASH
         self.send_empty = False
         self.receipt_response = "null"
+        self.receipt_sequence: list[str] = []
         self.estimate = "51234\n"
 
     def __call__(self, command: list[str], **kwargs):
@@ -52,12 +58,40 @@ class FakeCastRunner:
             output = hex(self.nonce)
         elif args[:1] == ["gas-price"]:
             output = self.gas_price
+        elif args[:1] == ["base-fee"]:
+            output = self.base_fee
+        elif args[:1] == ["to-check-sum-address"]:
+            output = args[1]
+        elif args[:1] == ["block"]:
+            output = json.dumps(
+                {
+                    "number": hex(self.block_number),
+                    "hash": "0x" + "ab" * 32,
+                    "timestamp": "0x64",
+                    "gasLimit": "0x5208",
+                    "gasUsed": "0x5208",
+                    "baseFeePerGas": "0x3b9aca00",
+                    "transactions": ["0x1", "0x2"],
+                }
+            )
         elif args[:1] == ["rpc"] and len(args) > 1 and args[1] == "eth_getTransactionReceipt":
-            output = self.receipt_response
+            output = (
+                self.receipt_sequence.pop(0) if self.receipt_sequence else self.receipt_response
+            )
         elif args[:1] == ["call"]:
             signature = args[2]
             if signature == "transfer(address,uint256)":
                 output = "0x" + "0" * 63 + ("1" if self.transfer_success else "0")
+            elif signature == "approve(address,uint256)":
+                output = "0x" + "0" * 63 + ("1" if self.transfer_success else "0")
+            elif signature == "name()(string)":
+                output = self.name
+            elif signature == "symbol()(string)":
+                output = self.symbol
+            elif signature == "totalSupply()(uint256)":
+                output = json.dumps([str(self.token_balance)])
+            elif signature == "allowance(address,address)(uint256)":
+                output = json.dumps([str(self.allowance)])
             else:
                 raw = (
                     self.token_decimals if signature == "decimals()(uint8)" else self.token_balance
@@ -575,6 +609,166 @@ class AppCommandTests(unittest.TestCase):
         self.assertNotIn("cast estimate", stderr.getvalue())
         self.assertNotIn("cast send", stderr.getvalue())
         self.assertNotIn(private_rpc, stderr.getvalue())
+
+    def test_config_show_reports_resolved_settings_without_rpc(self) -> None:
+        self.add_wallet()
+        result = execute(["config", "show"], self.app)
+        self.assertEqual(result["command"], "config show")
+        self.assertEqual(result["profile"], "ethereum")
+        self.assertEqual(result["network"], "mainnet")
+        self.assertEqual(result["version"], 2)
+        self.assertEqual(result["wallet"], "primary")
+        self.assertEqual(result["contact_count"], 0)
+        self.assertEqual(self.runner.calls, [])
+
+    def test_checksum_block_and_call_outputs(self) -> None:
+        checksum = execute(["checksum", ADDRESS], self.app)
+        self.assertEqual(checksum["checksum"], ADDRESS)
+        self.assertEqual(
+            [command[0] for command in self.runner.commands()], ["to-check-sum-address"]
+        )
+
+        block = execute(["block", "latest"], self.app)
+        self.assertEqual(block["number"], "16")
+        self.assertEqual(block["transaction_count"], 2)
+        self.assertEqual(block["base_fee_per_gas"], "1000000000")
+
+        call = execute(["call", TOKEN, "decimals()(uint8)"], self.app)
+        self.assertEqual(call["signature"], "decimals()(uint8)")
+        self.assertEqual(call["result"], "[18]")
+
+    def test_estimate_alias_matches_send_dry_run(self) -> None:
+        self.add_wallet()
+        result = execute(["estimate", DESTINATION, "0.1"], self.app)
+        self.assertEqual(result["command"], "estimate")
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["amount_base_units"], "100000000000000000")
+        self.assertNotIn("send", [command[0] for command in self.runner.commands()])
+
+    def test_contacts_add_list_resolve_and_remove(self) -> None:
+        self.add_wallet()
+        saved = execute(["contact", "add", "bob", DESTINATION], self.app)
+        self.assertEqual(saved["address"], DESTINATION)
+        listed = execute(["contact", "list"], self.app)
+        self.assertEqual(listed["contacts"], [{"name": "bob", "address": DESTINATION}])
+
+        self.assertEqual(execute(["balance", "bob"], self.app)["address"], DESTINATION)
+        send = execute(["send", "bob", "0.1", "--dry-run"], self.app)
+        self.assertEqual(send["to"], DESTINATION)
+
+        removed = execute(["contact", "remove", "bob"], self.app)
+        self.assertEqual(removed["name"], "bob")
+        self.assertEqual(execute(["contact", "list"], self.app)["contacts"], [])
+
+    def test_token_metadata_saved_list_and_allowance(self) -> None:
+        self.add_wallet()
+        info = execute(["token", "info", TOKEN], self.app)
+        self.assertEqual(info["name"], "Test Token")
+        self.assertEqual(info["symbol"], "TT")
+        self.assertEqual(info["decimals"], 18)
+        self.assertEqual(info["total_supply_raw"], "1234567890123456789")
+
+        added = execute(["token", "add", TOKEN], self.app)
+        self.assertEqual(added["symbol"], "TT")
+        listed = execute(["token", "list"], self.app)
+        self.assertEqual(len(listed["tokens"]), 1)
+        self.assertEqual(listed["tokens"][0]["contract"], TOKEN)
+        self.assertEqual(listed["tokens"][0]["balance"], "1.234567890123456789")
+
+        allowance = execute(["token", "allowance", TOKEN, DESTINATION], self.app)
+        self.assertEqual(allowance["spender"], DESTINATION)
+        self.assertEqual(allowance["allowance"], "0.0000000000025")
+
+        self.assertEqual(execute(["token", "remove", TOKEN], self.app)["contract"], TOKEN)
+        self.assertEqual(execute(["token", "list"], self.app)["tokens"], [])
+        with self.assertRaisesRegex(WalletCliError, "not saved"):
+            execute(["token", "remove", TOKEN], self.app)
+
+    def test_token_revoke_dry_run_and_broadcast(self) -> None:
+        keystore = self.add_wallet()
+        self.app = self.make_app(terminal=True)
+        dry = execute(["token", "revoke", TOKEN, DESTINATION, "--dry-run"], self.app)
+        self.assertTrue(dry["dry_run"])
+        self.assertNotIn("send", [command[0] for command in self.runner.commands()])
+
+        sent = execute(["token", "revoke", TOKEN, DESTINATION, "--yes"], self.app)
+        self.assertEqual(sent["transaction_hash"], TX_HASH)
+        send = self.runner.commands()[-1]
+        self.assertEqual(send[0:5], ["send", TOKEN, "approve(address,uint256)", DESTINATION, "0"])
+        self.assertIn(str(keystore), send)
+
+    def test_tx_log_records_sends_and_lists_them(self) -> None:
+        self.add_wallet()
+        self.app = self.make_app(terminal=True)
+        execute(["send", DESTINATION, "0.1", "--yes"], self.app)
+        listed = execute(["tx", "list"], self.app)
+        self.assertEqual(len(listed["transactions"]), 1)
+        record = listed["transactions"][0]
+        self.assertEqual(record["hash"], TX_HASH)
+        self.assertEqual(record["kind"], "native")
+        self.assertEqual(record["chain_id"], 1)
+        self.assertEqual(record["to"], DESTINATION)
+
+    def test_tx_watch_returns_pending_then_mined(self) -> None:
+        self.runner.receipt_sequence = [
+            "null",
+            json.dumps({"transactionHash": TX_HASH, "status": "0x1"}),
+        ]
+        self.app.sleep = lambda _: None
+        result = execute(["tx", "watch", TX_HASH], self.app)
+        self.assertFalse(result["pending"])
+        self.assertEqual(result["receipt"]["status"], "0x1")
+
+        self.runner.receipt_sequence = ["null", "null"]
+        self.app.watch_attempts = 2
+        still_pending = execute(["tx", "watch", TX_HASH], self.app)
+        self.assertTrue(still_pending["pending"])
+        self.assertEqual(still_pending["attempts"], 2)
+
+    def test_wallet_watch_is_read_only_and_verify_reports_health(self) -> None:
+        watched = execute(["wallet", "watch", "cold", DESTINATION], self.app)
+        self.assertTrue(watched["watch_only"])
+        self.assertEqual(execute(["balance"], self.app)["address"], DESTINATION)
+
+        terminal = self.make_app(terminal=True)
+        with self.assertRaisesRegex(WalletCliError, "watch-only"):
+            execute(["send", DESTINATION, "0.1", "--yes"], terminal)
+
+        verified = execute(["wallet", "verify"], self.app)
+        self.assertEqual(verified["wallets"][0]["alias"], "cold")
+        self.assertTrue(verified["wallets"][0]["watch_only"])
+        self.assertTrue(verified["wallets"][0]["valid"])
+
+    def test_help_hides_advanced_commands_until_verbose(self) -> None:
+        default = execute(["help"], self.app)
+        self.assertIn("COMMANDS", default["text"])
+        self.assertNotIn("config show", default["text"])
+        self.assertNotIn("token add", default["text"])
+        self.assertIn("help --verbose", default["text"])
+
+        verbose = execute(["help", "--verbose"], self.app)
+        self.assertTrue(verbose["verbose"])
+        self.assertIn("config show", verbose["text"])
+        self.assertIn("token add", verbose["text"])
+
+        session = self.make_app()
+        session.verbose = True
+        self.assertIn("call CONTRACT", execute(["help"], session)["text"])
+
+        gated = execute(["help", "config"], self.app)
+        self.assertIn("advanced command", gated["text"])
+        shown = execute(["help", "config", "--verbose"], self.app)
+        self.assertIn("config show", shown["text"])
+
+    def test_wallet_info_and_list_mark_watch_only_wallets(self) -> None:
+        self.add_wallet("signer", ADDRESS)
+        execute(["wallet", "watch", "cold", DESTINATION], self.app)
+        info = execute(["wallet", "info", "cold"], self.app)
+        self.assertTrue(info["watch_only"])
+        self.assertIsNone(info["keystore"])
+        listed = execute(["wallet", "list"], self.app)["wallets"]
+        tags = {entry["alias"]: entry["watch_only"] for entry in listed}
+        self.assertEqual(tags, {"signer": False, "cold": True})
 
 
 if __name__ == "__main__":

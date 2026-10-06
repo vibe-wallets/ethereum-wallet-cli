@@ -13,8 +13,14 @@ from .help import topic_names
 COMMANDS = [
     "address",
     "balance",
+    "block",
+    "call",
     "chain",
+    "checksum",
     "clear",
+    "config",
+    "contact",
+    "estimate",
     "exit",
     "gas",
     "help",
@@ -29,10 +35,23 @@ COMMANDS = [
 ]
 
 SUBCOMMANDS: dict[str, list[str]] = {
-    "wallet": ["default", "delete", "import", "info", "list", "new", "rename", "use"],
+    "wallet": [
+        "default",
+        "delete",
+        "import",
+        "info",
+        "list",
+        "new",
+        "rename",
+        "use",
+        "verify",
+        "watch",
+    ],
     "chain": ["info", "list"],
-    "token": ["balance", "send"],
-    "tx": ["inspect"],
+    "token": ["add", "allowance", "balance", "info", "list", "remove", "revoke", "send"],
+    "tx": ["inspect", "list", "watch"],
+    "contact": ["add", "list", "remove"],
+    "config": ["show"],
 }
 
 NETWORKS = ["local", "mainnet", "testnet"]
@@ -83,6 +102,8 @@ def complete_candidates(
         return []
     if head == "tx":
         return _match(SUBCOMMANDS["tx"], partial) if len(words) == 1 else []
+    if head in {"contact", "config"}:
+        return _match(SUBCOMMANDS[head], partial) if len(words) == 1 else []
     if head == "send":
         return _match(TRANSFER_FLAGS, partial) if partial.startswith("-") else []
     if head in {"address", "balance", "nonce"} and len(words) == 1:

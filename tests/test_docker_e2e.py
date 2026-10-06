@@ -470,6 +470,8 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
 
             help_output = shell.command("help")
             self.assertIn("COMMANDS", help_output)
+            self.assertNotIn("config show", help_output)
+            self.assertNotIn("ADVANCED", help_output)
             self.assertIn("No external command ran", help_output)
 
             topic_output = shell.command("help wallet")
@@ -720,6 +722,62 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             self.assertNotIn("renamed", relisted)
             self.assertIn("generated", relisted)
             self.assertIn("imported", relisted)
+
+            config_shown = shell.command("config show")
+            self.assertIn("CONFIG", config_shown)
+            self.assertIn(account.lower(), config_shown.lower())
+            self.assertIn("No external command ran", config_shown)
+
+            checksum = shell.command(f"checksum {account}")
+            self.assertIn(account, checksum)
+            self.assertIn("cast to-check-sum-address", checksum)
+
+            contact = shell.command(f"contact add dest {DESTINATION}")
+            self.assertIn("saved", contact)
+            self.assertIn("No external command ran", contact)
+            estimate = shell.command("estimate dest 0.1")
+            self.assertIn("ESTIMATE NATIVE TRANSFER", estimate)
+            self.assertIn(DESTINATION.lower(), estimate.lower())
+
+            decimals_call = shell.command(f'call {TOKEN} "decimals()(uint8)"')
+            self.assertIn("18", decimals_call)
+
+            block = shell.command("block latest")
+            self.assertIn("BLOCK", block)
+            self.assertIn("Number", block)
+
+            token_add = shell.command(f"token add {TOKEN} TT")
+            self.assertIn("saved", token_add)
+            self.assertIn("No external command ran", token_add)
+            token_list = shell.command("token list")
+            self.assertIn("SAVED TOKENS", token_list)
+            self.assertIn(TOKEN.lower(), token_list.lower())
+            self.assertIn(account.lower(), token_list.lower())
+
+            watched = shell.command(f"wallet watch cold {DESTINATION}")
+            self.assertIn("watch-only", watched)
+            self.assertIn("No external command ran", watched)
+            watched_delete = shell.command("wallet delete cold --yes")
+            self.assertIn("deleted locally", watched_delete)
+            self.assertIn("No external command ran", watched_delete)
+
+            verified = shell.command("wallet verify")
+            self.assertIn("WALLET HEALTH", verified)
+            self.assertIn("generated", verified)
+            self.assertIn("imported", verified)
+
+            recorded = shell.command("tx list")
+            self.assertIn("RECORDED TRANSACTIONS", recorded)
+            self.assertIn(native_hash.lower(), recorded.lower())
+
+            watched_tx = shell.command(f"tx watch {native_hash}")
+            self.assertIn(native_hash, watched_tx)
+            self.assertIn('"status": "0x1"', watched_tx)
+
+            advanced = shell.command("help --verbose")
+            self.assertIn("ADVANCED", advanced)
+            self.assertIn("config show", advanced)
+            self.assertIn("No external command ran", advanced)
 
         # The actual launcher also handles one-shot JSON mode: result JSON stays on
         # stdout while all Cast commands and local-only traces stay on stderr.

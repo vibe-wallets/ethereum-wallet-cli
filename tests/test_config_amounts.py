@@ -77,6 +77,19 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(loaded, written)
         self.assertEqual(self.store.config_path.stat().st_mode & 0o777, 0o600)
 
+    def test_version_one_config_is_migrated_with_empty_contacts_and_tokens(self) -> None:
+        self.store.ensure_directory()
+        legacy = new_config()
+        legacy["version"] = 1
+        del legacy["contacts"]
+        del legacy["tokens"]
+        self.store.config_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+        loaded = self.store.load()
+        self.assertEqual(loaded["version"], 2)
+        self.assertEqual(loaded["contacts"], {})
+        self.assertEqual(loaded["tokens"], {})
+
     def test_malformed_and_unknown_schema_files_fail_closed(self) -> None:
         self.store.ensure_directory()
         self.store.config_path.write_text("{not json", encoding="utf-8")

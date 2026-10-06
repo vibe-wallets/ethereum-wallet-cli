@@ -134,6 +134,89 @@ exit
 
 Human output uses aligned labels, section titles, and tables with ANSI color on an interactive terminal; color is suppressed for redirected output and when `NO_COLOR` is set or `TERM=dumb`, so copied output stays plain. In one-shot JSON mode, `clear` returns `{"ok": true, "cleared": true}` instead of writing terminal control sequences.
 
+## Address book
+
+Save frequently used destinations once and use their names wherever an address is accepted:
+
+```text
+contact add alice 0xAliceAddress
+contact add cold 0xColdWalletAddress
+contact list
+balance cold
+send alice 0.01 --dry-run
+contact remove alice
+```
+
+Contacts are local public metadata stored in the profile's config directory.
+
+## Saved tokens
+
+RPC endpoints cannot enumerate ERC-20 balances, so save the tokens you care about and list them per network:
+
+```text
+token add 0xTokenContract TT
+token add 0xOtherContract
+token list
+token info 0xTokenContract
+token remove 0xOtherContract
+```
+
+`token add` reads the symbol from the contract when you do not pass one, and `token list` reads each saved token's balance for the selected wallet.
+
+## Allowances
+
+Inspect and clear ERC-20 allowances:
+
+```text
+token allowance 0xTokenContract 0xSpenderAddress
+token allowance 0xTokenContract 0xSpenderAddress 0xOwnerAddress
+token revoke 0xTokenContract 0xSpenderAddress --dry-run
+token revoke 0xTokenContract 0xSpenderAddress
+```
+
+`token revoke` resets an allowance to zero by sending an `approve` transaction, so it asks before signing unless `--yes` is given.
+
+## Advanced reads
+
+```text
+config show
+call 0xTokenContract "balanceOf(address)(uint256)" 0xWalletAddress
+call 0xTokenContract "decimals()(uint8)"
+checksum 0xLowercaseAddress
+block latest
+estimate 0xRecipientAddress 0.01
+```
+
+`config show` prints the resolved settings without any RPC request. `call` runs a read-only view function. `checksum` prints the EIP-55 form locally. `block` shows a block header. `estimate` is a native-transfer gas estimate that never signs.
+
+## Transaction log and watching
+
+RPC endpoints cannot list a wallet's history, so the CLI records the hashes it broadcasts itself:
+
+```text
+tx list
+tx list 50
+tx watch 0xTransactionHash
+```
+
+`tx list` filters the local log to the current network. `tx watch` polls until the transaction is mined and then prints its receipt.
+
+## Watch-only wallets and health checks
+
+```text
+wallet watch cold 0xColdWalletAddress
+balance cold
+wallet verify
+wallet verify cold
+wallet delete cold --yes
+```
+
+A watch-only wallet has no keystore and can be read from but never signs; signing commands refuse it. `wallet verify` re-checks each local keystore for readability, address consistency, and permissions, which is useful before relying on a backup.
+
+## Advanced help
+
+The common `help` index hides the advanced commands above. Run `help --verbose` (or start the shell with `--verbose`) to show them, and `help TOPIC` for one focused page such as `help send`, `help token`, or `help contact`.
+
 ## Supported network mapping
 
 The `--network` values map to these fixed chains:

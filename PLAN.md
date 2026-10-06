@@ -51,6 +51,20 @@ Interactive usability and new commands
 - Validation: 97 offline tests, `make test-integration`, and `make test-docker`
   (including a real-PTY tab-completion and new-command flow) all pass locally.
 
+Advanced command batch
+
+- Address book (`contact add/list/remove`), saved-token registry (`token
+  add/list/remove/info`), read-only `call`, local `checksum`, `block`,
+  `estimate`, ERC-20 `token allowance` and `token revoke`, local `tx
+  list`/`tx watch`, and `wallet watch`/`wallet verify`.
+- Config schema is now version 2 (adds contacts and saved tokens) with migration
+  from version 1; a separate append-only `transactions.jsonl` records the hashes
+  this CLI broadcasts, because EVM RPC endpoints cannot list history.
+- Advanced commands are hidden from the default `help` index and from advanced-only
+  `help TOPIC` pages; `help --verbose` or a `--verbose` session shows them.
+- Validation: 108 offline tests, plus the Docker end-to-end suite extended with the
+  new commands and verbose-help gating.
+
 Distribution decision and delivery fix
 - The GHCR package is distributed privately. The `publish` job publishes the immutable
   commit-SHA image; `published-e2e` and `default-image-e2e` grant `packages: read` to
