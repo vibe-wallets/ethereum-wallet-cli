@@ -10,7 +10,8 @@ these files automatically. The launchers default to the public
 `ghcr.io/vibe-wallets/ethereum-wallet-cli:main` image and pull it before each run;
 set the profile's `*_WALLET_IMAGE=ethereum-wallet-cli:local` only after a local
 `make build`. Remote images are pulled each time, and a pull failure stops the
-launch. Public pulls require no login once the tag has been published.
+launch. When the package is public, pulls need no login; while it is private, the
+launcher uses the caller's existing `ghcr.io` Docker credentials.
 
 The launcher forwards only its own wallet network and RPC settings into the
 container. The optional `ETHEREUM_WALLET_DOCKER_NETWORK` or

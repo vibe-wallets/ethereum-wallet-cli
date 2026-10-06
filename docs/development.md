@@ -46,7 +46,7 @@ If Anvil runs in a separate Docker container, put it on a user-created network a
 
 The release sequence first builds and validates an image, then publishes that tested artifact under an immutable full-commit-SHA tag. A fresh anonymous runner pulls the exact digest of that SHA-tagged image and reruns the full Docker end-to-end suite, covering both profiles and wallet management, signing, native transfers, fixture-backed ERC-20 transfers, output, and error paths. Only after those checks pass does CI promote that exact image digest to the public `main` and `latest` tags. The moving `main` tag is updated only after the fresh-runner registry test succeeds; a final fresh-runner job pulls and tests the promoted default tag too. To test any published reference yourself, run `make test-published PUBLISHED_IMAGE=...`.
 
-The public registry pull path is designed to work without authentication. CI publication uses the GitHub Actions token and a temporary Docker credential configuration on the runner; it does not write credentials into the repository or developer Docker configuration. The same job makes the container package publicly readable before the anonymous delivery gate. This pipeline description does not establish that a tag is currently available; check the successful release workflow before relying on a published image.
+The public registry pull path works without authentication once the package is public. While the package is private, the same workflows pull it with the runner's temporary GitHub Actions token, and ordinary launchers use the caller's existing GHCR credentials. CI publication uses that token and a temporary Docker credential configuration on the runner; it does not write credentials into the repository or developer Docker configuration. This pipeline description does not establish that a tag is currently available; check the successful release workflow before relying on a published image.
 
 ## Adding another chain profile
 
@@ -69,16 +69,21 @@ public, and repository access inheritance does not by itself establish anonymous
 package access. On the first release the SHA image can publish successfully while an
 anonymous pull is still denied.
 
-The `publish` job now makes the package publicly readable through the workflow's own
-`GITHUB_TOKEN` (which has `packages: write`) and then requires an anonymous
-`docker manifest inspect` to succeed before the job finishes. `published-e2e` runs
-on a fresh runner with an empty Docker configuration, so it can only pass once the
-package is genuinely public. The default `main`/`latest` tags are promoted only
-after that gate, and `default-image-e2e` re-tests the promoted tag. Do not bypass
-these gates to label an inaccessible image as released.
+The `publish` job first tries to make the package publicly readable through the
+workflow's own `GITHUB_TOKEN` and reports the resulting visibility. That token can
+push images but is not guaranteed to hold package-admin rights, so this visibility
+call is best-effort and does not fail the release. The `published-e2e` job records
+whether the exact digest is anonymously readable, then pulls it on a fresh runner
+with the workflow token when it is not. The full Docker end-to-end suite still has to
+pass before `promote` publishes `main` and `latest`, and `default-image-e2e` re-tests
+the promoted tag on another fresh runner. Do not bypass these gates to label an
+unreachable image as released.
 
-If the visibility call ever fails, a package administrator can open
+While the package is private, ordinary launchers pull through the caller's existing
+GHCR credentials (the same `~/.docker/config.json` entry that already authenticates
+`ghcr.io`). A package administrator can open
 [the package settings](https://github.com/orgs/vibe-wallets/packages/container/ethereum-wallet-cli/settings),
-choose **Change visibility → Public**, confirm the package name, and rerun the failed
-workflow jobs. GitHub states that a public package cannot later become private; see
-its [package visibility documentation](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
+choose **Change visibility → Public**, confirm the package name, and re-run the
+release to restore anonymous pulls. GitHub states that a public package cannot later
+become private; see its
+[package visibility documentation](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).

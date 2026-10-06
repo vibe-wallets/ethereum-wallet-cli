@@ -9,7 +9,7 @@ scripts/ethereum-wallet-cli
 scripts/monad-wallet-cli
 ```
 
-Pull failures stop the launcher instead of running an older cached image. CI promotes the `main` tag only after pulling and testing the published image on a fresh runner. For local development, build with `make build` and explicitly select `ethereum-wallet-cli:local` using the matching profile's image environment variable.
+Pull failures stop the launcher instead of running an older cached image. The GHCR container package may be private; when it is, the launcher authenticates with the caller's existing `ghcr.io` Docker credentials, and an administrator can make it public in the package settings for anonymous pulls. CI promotes the `main` tag only after pulling and testing the published image on a fresh runner. For local development, build with `make build` and explicitly select `ethereum-wallet-cli:local` using the matching profile's image environment variable.
 
 The two CLIs use separate state directories and do not share wallet aliases or encrypted keys. By default, Ethereum state lives in `~/.config/ethereum-wallet-cli` and Monad state in `~/.config/monad-wallet-cli` (under `$XDG_CONFIG_HOME` when set). Override them with `ETHEREUM_WALLET_CONFIG_DIR` and `MONAD_WALLET_CONFIG_DIR`, respectively. Each directory is mounted at `/data` inside its disposable container. `ETHEREUM_WALLET_IMAGE` and `MONAD_WALLET_IMAGE` can select another image independently; the local tag is an explicit developer override.
 

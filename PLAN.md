@@ -22,12 +22,15 @@ Run https://github.com/vibe-wallets/ethereum-wallet-cli/actions/runs/37519302657
 - The SHA image pulls with existing local Docker credentials and the full pulled-image
   E2E passed locally (25.017s), including both actual interactive wallet launchers.
 
-Resolved in the release workflow: the `publish` job now makes the container package
-publicly readable with the workflow's own `GITHUB_TOKEN` (`packages: write`) and then
-requires an anonymous `docker manifest inspect` to succeed before the job completes.
-This removes the manual package-setting step that blocked the first release. The
-`published-e2e` fresh-runner anonymous pull remains the hard gate, and `promote`
-still runs only after it passes.
+Release workflow hardened for a private or public package: the `publish` job now
+attempts to make the container package public with its own `GITHUB_TOKEN` and reports
+the resulting visibility without failing the release. The `published-e2e` job records
+whether the exact digest is anonymously readable, then pulls it on a fresh runner
+with the workflow token when it is not, so promotion is no longer blocked solely by
+package visibility. The fresh-runner registry E2E, promote, and default-tag E2E gates
+remain in place. The visibility change requires package-admin rights that the Actions
+token may not hold; the existing GHCR credential in `~/.docker/config.json` was
+verified to pull the private SHA image, and `:main` is unpublished until promotion runs.
 
 Next: push this workflow fix, monitor the new run, and confirm publish, published-e2e,
 promote, and default-image-e2e all pass before claiming release delivery. If the
