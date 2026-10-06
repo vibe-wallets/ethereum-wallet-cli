@@ -27,7 +27,7 @@ Final validation actually run:
   through PTYs, hide passwords, trace after output, select IDs 1/143, and isolate stores.
 - Source lint, shell syntax, Markdown links/anchors and repository acceptance reviewed.
 
-Implementation is complete. Saving the implementation and updated AGENTS.md to GitHub
-is now authorized; commit/push and verification of the resulting CI are in progress.
+Implementation is complete and pushed to GitHub on `main` at `cd75510`. The GitHub
+Actions Tests workflow passed for that implementation commit.
 No live-funded networks, system package installs or home-folder modifications.
 Development tools were installed/extracted only below /tmp; the Solana reference is unchanged.
