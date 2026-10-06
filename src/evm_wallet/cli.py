@@ -7,11 +7,14 @@ import json
 import os
 import shlex
 import sys
-from typing import Sequence, TextIO
+from typing import Callable, Sequence, TextIO
 
-from .app import HELP_TEXT, Application, execute
+from .app import Application, execute
 from .chains import PROFILE_NETWORKS
+from .completion import complete_candidates
 from .errors import WalletCliError
+from .help import help_text
+from .history import HISTORY_LIMIT, append_history, read_history
 from .human import (
     CLEAR_SCREEN,
     action_preview,
@@ -24,6 +27,11 @@ from .human import (
     style_help,
     table,
 )
+
+try:  # GNU readline is optional; the shell still works without line editing.
+    import readline
+except ImportError:  # pragma: no cover - depends on the Python build
+    readline = None  # type: ignore[assignment]
 
 
 def _parser(
@@ -75,7 +83,7 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
     output = output or sys.stdout
     command = result.get("command")
     if command == "help":
-        print(style_help(result.get("text", HELP_TEXT), stream=output), file=output)
+        print(style_help(result.get("text", help_text()), stream=output), file=output)
     elif command == "exit":
         return
     elif command == "clear":
@@ -120,6 +128,22 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
         ]
         print(section_title("NETWORK", stream=output), file=output)
         print(key_value_rows(rows, stream=output), file=output)
+    elif command == "status":
+        rows = [
+            ("Network", network_label(str(result["network"]), stream=output)),
+            (
+                "Wallet",
+                f"{result['wallet']} ({result['address']})"
+                if "wallet" in result
+                else color("none selected", "warning", stream=output),
+            ),
+            ("Chain ID", str(result["chain_id"])),
+            ("RPC URL", result["rpc_url"]),
+        ]
+        if "balance_native" in result:
+            rows.append(("Balance", result["balance_native"], "emphasis"))
+        print(section_title("STATUS", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
     elif command == "balance":
         rows = [
             ("Address", result["address"]),
@@ -137,6 +161,23 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             ("Balance", result["balance"], "emphasis"),
         ]
         print(section_title("TOKEN BALANCE", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
+    elif command == "nonce":
+        rows = [
+            ("Address", result["address"]),
+            ("Network", network_label(str(result["chain"]), stream=output)),
+            ("Nonce", str(result["nonce"]), "emphasis"),
+        ]
+        print(section_title("NONCE", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
+    elif command == "gas":
+        rows = [
+            ("Network", network_label(str(result["chain"]), stream=output)),
+            ("Chain ID", str(result["chain_id"])),
+            ("Gas price", f"{result['gas_price_gwei']} gwei", "emphasis"),
+            ("Exact wei", str(result["gas_price_wei"])),
+        ]
+        print(section_title("GAS", stream=output), file=output)
         print(key_value_rows(rows, stream=output), file=output)
     elif command == "send" and result.get("dry_run"):
         preview = action_preview(
@@ -176,6 +217,16 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             print(json.dumps(result["transaction"], indent=2, sort_keys=True), file=output)
             print(section_title("RECEIPT", stream=output), file=output)
             print(json.dumps(result["receipt"], indent=2, sort_keys=True), file=output)
+    elif command == "history":
+        entries = result.get("entries", [])
+        print(section_title("HISTORY", stream=output), file=output)
+        if not entries:
+            print(color("No history yet.", "muted", stream=output), file=output)
+        else:
+            width = len(str(len(entries)))
+            for index, entry in enumerate(entries, start=1):
+                number = color(f"{index:>{width}}", "muted", stream=output)
+                print(f"  {number}  {entry}", file=output)
     elif command in {"wallet new", "wallet import"}:
         ready = f"Wallet '{result['alias']}' is ready"
         print(
@@ -190,6 +241,15 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
         ]
         print(section_title("WALLET", stream=output), file=output)
         print(key_value_rows(rows, stream=output), file=output)
+    elif command == "wallet rename":
+        renamed = f"Wallet '{result['old_alias']}' renamed to '{result['alias']}'"
+        print(
+            f"{color(renamed, 'success', stream=output)} at {result['address']}.",
+            file=output,
+        )
+    elif command == "wallet delete":
+        deleted = f"Wallet '{result['alias']}' deleted locally"
+        print(f"{color(deleted, 'success', stream=output)}.", file=output)
     elif command == "address":
         print(result["address"], file=output)
     elif command in {"wallet use", "wallet default"}:
@@ -276,13 +336,51 @@ def _print_banner(app: Application, state: dict[str, object]) -> None:
             stream=sys.stdout,
         )
     )
-    print("Type `help` for commands, or `balance` after selecting a wallet.\n")
+    print("Type `help` for commands, press Tab to complete, or `status` to refresh.\n")
+
+
+def _wallet_aliases(app: Application) -> list[str]:
+    """Return configured wallet aliases for completion, or none on any config error."""
+    try:
+        return sorted(app.config()["wallets"])
+    except WalletCliError:
+        return []
+
+
+def _completer(app: Application) -> Callable[[str, int], str | None]:
+    """Build a readline completer bound to the current application."""
+
+    def complete(text: str, state: int) -> str | None:
+        if readline is None:  # pragma: no cover - only without readline
+            return None
+        begin = readline.get_begidx()
+        tokens = readline.get_line_buffer()[:begin].split()
+        matches = complete_candidates(tokens, text, _wallet_aliases(app))
+        return matches[state] if state < len(matches) else None
+
+    return complete
+
+
+def _setup_readline(app: Application) -> None:
+    """Enable Tab completion, history recall, and persisted history when available."""
+    if readline is None:  # pragma: no cover - only without readline
+        return
+    readline.set_completer_delims(" \t\n")
+    readline.set_completer(_completer(app))
+    readline.parse_and_bind("tab: complete")
+    readline.set_history_length(HISTORY_LIMIT)
+    try:
+        readline.read_history_file(str(app.history_path))
+    except (OSError, ValueError):
+        pass
 
 
 def _shell(app: Application) -> int:
     """Read commands from an interactive terminal until exit or EOF."""
     banner_state = app.config()
     _print_banner(app, banner_state)
+    app.history = read_history(app.history_path)
+    _setup_readline(app)
     while True:
         try:
             state = app.config()
@@ -308,6 +406,8 @@ def _shell(app: Application) -> int:
             continue
         if not tokens:
             continue
+        app.history.append(line)
+        append_history(app.history_path, line)
         try:
             result = execute(tokens, app)
             if result.get("command") == "exit":

@@ -469,8 +469,17 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             self.assertIn("No external command ran", initial)
 
             help_output = shell.command("help")
-            self.assertIn("Commands:", help_output)
+            self.assertIn("COMMANDS", help_output)
             self.assertIn("No external command ran", help_output)
+
+            topic_output = shell.command("help wallet")
+            self.assertIn("WALLET COMMANDS", topic_output)
+            self.assertIn("No external command ran", topic_output)
+
+            # Tab completion runs through GNU readline inside the real launcher.
+            completed = shell.command("chain lis\t")
+            self.assertIn("NETWORKS", completed)
+            self.assertIn("No external command ran", completed)
 
             cleared = shell.command("clear")
             self.assertIn("No external command ran", cleared)
@@ -554,6 +563,21 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             self.assertIn("mainnet", balance.lower())
             self.assertIn("10000", balance)
             self._assert_cast_sequence(balance, ["chain-id", "rpc"])
+
+            status = shell.command("status")
+            self.assertIn("STATUS", status)
+            self.assertIn("mainnet", status.lower())
+            self.assertIn("imported", status)
+            self.assertIn("10000", status)
+            self.assertIn("10", status)
+
+            gas = shell.command("gas")
+            self.assertIn("GAS", gas)
+            self.assertIn("gwei", gas)
+
+            nonce = shell.command("nonce")
+            self.assertIn("NONCE", nonce)
+            self.assertIn(account.lower(), nonce.lower())
 
             token_balance = shell.command(f"token balance {TOKEN}")
             self.assertIn("token balance", token_balance.lower())
@@ -674,6 +698,28 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             local_error = shell.command("not-a-wallet-command")
             self.assertIn("Unknown command", local_error)
             self.assertIn("No external command ran", local_error)
+
+            history = shell.command("history")
+            self.assertIn("HISTORY", history)
+            self.assertIn("wallet", history)
+            self.assertIn("No external command ran", history)
+
+            scratch = shell.command(
+                "wallet new scratch",
+                prompts=[(b"Enter secret:", password)],
+            )
+            self.assertIn("Wallet 'scratch' is ready", scratch)
+            self.assertNotIn(password, scratch)
+            renamed = shell.command("wallet rename scratch renamed")
+            self.assertIn("renamed to 'renamed'", renamed)
+            self.assertIn("No external command ran", renamed)
+            deleted = shell.command("wallet delete renamed --yes")
+            self.assertIn("deleted locally", deleted)
+            self.assertIn("No external command ran", deleted)
+            relisted = shell.command("wallet list")
+            self.assertNotIn("renamed", relisted)
+            self.assertIn("generated", relisted)
+            self.assertIn("imported", relisted)
 
         # The actual launcher also handles one-shot JSON mode: result JSON stays on
         # stdout while all Cast commands and local-only traces stay on stderr.

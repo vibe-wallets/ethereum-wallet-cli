@@ -21,7 +21,8 @@ from .chains import (
 )
 from .config import ConfigStore, validate_alias
 from .errors import ConfigurationError, FoundryError, WalletCliError
-from .foundry import CastClient, unwrap_cast_json
+from .foundry import CastClient, parse_integer_output, unwrap_cast_json
+from .help import help_text
 
 KEYSTORE_ADDRESS_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
@@ -59,6 +60,8 @@ class Application:
         self.startup_chain = chain_name or profile_networks.get(network_name) or default_chain
         self.rpc_url_override = validate_rpc_url(rpc_url) if rpc_url else None
         self.session_wallet_alias: str | None = None
+        self.history: list[str] = []
+        self.history_path = self.store.directory / "history"
 
     def config(self) -> dict[str, Any]:
         return self.store.load()
@@ -235,6 +238,76 @@ class Application:
     def json_rpc_integer(self, chain: Chain, method: str, *params: str, label: str) -> int:
         return self.cast.rpc_integer(chain, method, *params, label=label)
 
+    def rename_wallet(self, old: str, new: str) -> dict[str, Any]:
+        """Rename a local wallet alias without touching its encrypted keystore."""
+        old = validate_alias(old)
+        new = validate_alias(new)
+        if old == new:
+            raise WalletCliError("The new wallet alias must differ from the old one.")
+
+        def rename(config: dict[str, Any]) -> None:
+            if old not in config["wallets"]:
+                raise WalletCliError(f"Wallet alias '{old}' was not found.")
+            if new in config["wallets"]:
+                raise WalletCliError(f"Wallet alias '{new}' already exists; choose another alias.")
+            config["wallets"][new] = config["wallets"].pop(old)
+            if config["default_wallet"] == old:
+                config["default_wallet"] = new
+            if config["current_wallet"] == old:
+                config["current_wallet"] = new
+
+        updated = self.store.update(rename)
+        if self.session_wallet_alias == old:
+            self.session_wallet_alias = new
+        return {
+            "command": "wallet rename",
+            "old_alias": old,
+            "alias": new,
+            "address": updated["wallets"][new]["address"],
+        }
+
+    def delete_wallet(self, alias: str, *, yes: bool) -> dict[str, Any]:
+        """Remove a local wallet alias and its encrypted keystore.
+
+        The alias is deregistered first so config never points at a missing file;
+        on-chain funds are unaffected and require no network access.
+        """
+        alias = validate_alias(alias)
+        state = self.config()
+        if alias not in state["wallets"]:
+            raise WalletCliError(f"Wallet alias '{alias}' was not found.")
+        metadata = state["wallets"][alias]
+        keystore = self.store.keystore_path(metadata)
+        if not yes:
+            answer = self.input_fn(
+                f"Delete local wallet '{alias}' ({metadata['address']})?\n"
+                "This removes the encrypted keystore; on-chain funds are unaffected.\n"
+                "Type 'yes' to continue: "
+            )
+            if answer.strip().lower() != "yes":
+                raise WalletCliError("Deletion cancelled.")
+
+        def remove(config: dict[str, Any]) -> None:
+            config["wallets"].pop(alias, None)
+            if config["default_wallet"] == alias:
+                config["default_wallet"] = None
+            if config["current_wallet"] == alias:
+                config["current_wallet"] = None
+
+        self.store.update(remove)
+        try:
+            keystore.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise ConfigurationError(
+                "The wallet alias was removed, but its encrypted keystore file "
+                f"could not be deleted: {exc.strerror}."
+            ) from exc
+        if self.session_wallet_alias == alias:
+            self.session_wallet_alias = None
+        return {"command": "wallet delete", "alias": alias, "address": metadata["address"]}
+
     @staticmethod
     def _parse_json_result(output: str, label: str) -> Any:
         try:
@@ -295,7 +368,10 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
     if not tokens:
         raise WalletCliError("Enter a command. Use 'help' to see the command list.")
     if tokens[0] in {"help", "--help", "-h"}:
-        return {"command": "help", "text": HELP_TEXT}
+        if len(tokens) > 2:
+            raise WalletCliError("Usage: help [TOPIC].")
+        topic = tokens[1] if len(tokens) == 2 else None
+        return {"command": "help", "topic": topic, "text": help_text(topic)}
     if tokens[0] == "clear":
         if len(tokens) != 1:
             raise WalletCliError("Usage: clear.")
@@ -307,13 +383,24 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
     if tokens[0] == "wallet":
         if len(tokens) < 2:
             raise WalletCliError(
-                "Usage: wallet new|import ALIAS, wallet list|use|default|info [ALIAS]."
+                "Usage: wallet new|import ALIAS, wallet list|use|default|info [ALIAS], "
+                "wallet rename OLD NEW, wallet delete ALIAS [--yes]."
             )
         action = tokens[1]
         if action in {"new", "import"}:
             if len(tokens) != 3:
                 raise WalletCliError(f"Usage: wallet {action} ALIAS.")
             return app.create_wallet(tokens[2], action)
+        if action == "rename":
+            if len(tokens) != 4:
+                raise WalletCliError("Usage: wallet rename OLD_ALIAS NEW_ALIAS.")
+            return app.rename_wallet(tokens[2], tokens[3])
+        if action == "delete":
+            yes = "--yes" in tokens
+            args = [token for token in tokens[2:] if token != "--yes"]
+            if len(args) != 1:
+                raise WalletCliError("Usage: wallet delete ALIAS [--yes].")
+            return app.delete_wallet(args[0], yes=yes)
         state = app.config()
         if action == "list" and len(tokens) == 2:
             wallets = []
@@ -362,7 +449,8 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
                 "keystore": str(keystore),
             }
         raise WalletCliError(
-            "Usage: wallet new|import ALIAS, wallet list|use|default|info [ALIAS]."
+            "Usage: wallet new|import ALIAS, wallet list|use|default|info [ALIAS], "
+            "wallet rename OLD NEW, wallet delete ALIAS [--yes]."
         )
 
     # Public address lookup.
@@ -416,6 +504,12 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             }
         raise WalletCliError("Usage: chain list | chain info [mainnet|testnet|local].")
 
+    # Overview of the selected network, wallet, and native balance.
+    if tokens[0] == "status":
+        if len(tokens) != 1:
+            raise WalletCliError("Usage: status.")
+        return _status(app)
+
     # Native coin balance.
     if tokens[0] == "balance" and len(tokens) in {1, 2}:
         state = app.config()
@@ -434,6 +528,39 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             "address": address,
             "balance_base_units": str(raw),
             "balance_native": format_units(raw, 18),
+        }
+
+    # Next transaction nonce for the selected or given address.
+    if tokens[0] == "nonce" and len(tokens) in {1, 2}:
+        state = app.config()
+        chain = app.active_chain(state)
+        address = (
+            validate_address(tokens[1], "address")
+            if len(tokens) == 2
+            else app.wallet(state=state)[1]["address"]
+        )
+        raw = app.json_rpc_integer(
+            chain, "eth_getTransactionCount", address, "pending", label="nonce"
+        )
+        return {
+            "command": "nonce",
+            "chain": app.network_label(chain),
+            "address": address,
+            "nonce": str(raw),
+        }
+
+    # Current gas price reported by the selected network.
+    if tokens[0] == "gas" and len(tokens) == 1:
+        state = app.config()
+        chain = app.active_chain(state)
+        output = app.cast.network(chain, ["gas-price"])
+        wei = parse_integer_output(output, "gas price")
+        return {
+            "command": "gas",
+            "chain": app.network_label(chain),
+            "chain_id": chain.chain_id,
+            "gas_price_wei": str(wei),
+            "gas_price_gwei": format_units(wei, 9),
         }
 
     # Native coin transfer: estimate, confirm, sign, and broadcast.
@@ -665,25 +792,49 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             "pending": False,
         }
 
+    # Recent interactive shell commands.
+    if tokens[0] == "history" and len(tokens) in {1, 2}:
+        count = 20
+        if len(tokens) == 2:
+            try:
+                count = int(tokens[1], 10)
+            except ValueError as exc:
+                raise WalletCliError("Usage: history [COUNT].") from exc
+            if count < 1:
+                raise WalletCliError("Usage: history [COUNT].")
+        return {"command": "history", "count": count, "entries": app.history[-count:]}
+
     raise WalletCliError(f"Unknown command '{tokens[0]}'. Use 'help' to see available commands.")
 
 
-HELP_TEXT = """Commands:
-  wallet new ALIAS                         Create an encrypted Foundry keystore
-  wallet import ALIAS                      Import a private key through hidden prompts
-  wallet list | use ALIAS | default ALIAS | info [ALIAS]
-  address [ALIAS]
-  chain list | info [mainnet|testnet|local]
-  balance [ADDRESS]
-  send DESTINATION AMOUNT [--dry-run | --yes]
-  token balance CONTRACT [ADDRESS]
-  token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
-  tx inspect HASH
-  help | clear | exit | quit
-
-Amounts are exact decimal strings. Sends require an interactive terminal to unlock
-the encrypted keystore; --yes skips the transaction confirmation prompt.
-"""
+def _status(app: Application) -> dict[str, Any]:
+    """Describe the selected network and wallet, including the native balance."""
+    state = app.config()
+    chain = app.active_chain(state)
+    result: dict[str, Any] = {
+        "command": "status",
+        "profile": app.profile,
+        "network": app.network_label(chain),
+        "chain_id": chain.chain_id,
+        "rpc_url": chain.rpc_url,
+    }
+    alias = app.active_wallet_alias(state)
+    if alias and alias in state["wallets"]:
+        address = state["wallets"][alias]["address"]
+        raw = app.json_rpc_integer(
+            chain, "eth_getBalance", address, "latest", label="native balance"
+        )
+        result.update(
+            {
+                "wallet": alias,
+                "address": address,
+                "balance_base_units": str(raw),
+                "balance_native": format_units(raw, 18),
+            }
+        )
+    else:
+        app.cast.verify_chain(chain)
+    return result
 
 
 def _parse_send_receipt(

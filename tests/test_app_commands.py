@@ -32,6 +32,8 @@ class FakeCastRunner:
         self.eth_balance = 0x1BC16D674EC80001
         self.token_decimals = 18
         self.token_balance = 1_234_567_890_123_456_789
+        self.nonce = 3
+        self.gas_price = "1500000000\n"
         self.transfer_success = True
         self.send_status = "0x1"
         self.send_hash: str | None = TX_HASH
@@ -46,6 +48,10 @@ class FakeCastRunner:
             output = str(self.chain_id)
         elif args[:1] == ["rpc"] and len(args) > 1 and args[1] == "eth_getBalance":
             output = hex(self.eth_balance)
+        elif args[:1] == ["rpc"] and len(args) > 1 and args[1] == "eth_getTransactionCount":
+            output = hex(self.nonce)
+        elif args[:1] == ["gas-price"]:
+            output = self.gas_price
         elif args[:1] == ["rpc"] and len(args) > 1 and args[1] == "eth_getTransactionReceipt":
             output = self.receipt_response
         elif args[:1] == ["call"]:
@@ -388,6 +394,85 @@ class AppCommandTests(unittest.TestCase):
         result = execute(["chain", "list", "--json"], self.app)
         self.assertEqual(result["command"], "chain list")
         self.assertEqual({chain["chain_id"] for chain in result["chains"]}, {1, 11155111, 31337})
+
+    def test_status_reports_network_wallet_and_native_balance(self) -> None:
+        self.add_wallet()
+        result = execute(["status"], self.app)
+        self.assertEqual(result["command"], "status")
+        self.assertEqual(result["profile"], "ethereum")
+        self.assertEqual(result["network"], "mainnet")
+        self.assertEqual(result["chain_id"], 1)
+        self.assertEqual(result["wallet"], "primary")
+        self.assertEqual(result["address"], ADDRESS)
+        self.assertEqual(result["balance_native"], "2.000000000000000001")
+        self.assertEqual([command[0] for command in self.runner.commands()], ["chain-id", "rpc"])
+
+    def test_status_without_a_wallet_checks_the_network_only(self) -> None:
+        result = execute(["status"], self.app)
+        self.assertNotIn("wallet", result)
+        self.assertNotIn("balance_native", result)
+        self.assertEqual([command[0] for command in self.runner.commands()], ["chain-id"])
+
+    def test_gas_and_nonce_read_from_the_network(self) -> None:
+        self.add_wallet()
+        gas = execute(["gas"], self.app)
+        self.assertEqual(gas["gas_price_wei"], "1500000000")
+        self.assertEqual(gas["gas_price_gwei"], "1.5")
+
+        nonce = execute(["nonce"], self.app)
+        self.assertEqual(nonce["nonce"], "3")
+        self.assertEqual(nonce["address"], ADDRESS)
+        explicit = execute(["nonce", DESTINATION], self.app)
+        self.assertEqual(explicit["address"], DESTINATION)
+
+    def test_wallet_rename_moves_alias_and_updates_defaults(self) -> None:
+        self.add_wallet("primary")
+        self.add_wallet("secondary", DESTINATION)
+        renamed = execute(["wallet", "rename", "primary", "daily"], self.app)
+        self.assertEqual(renamed["old_alias"], "primary")
+        self.assertEqual(renamed["alias"], "daily")
+        state = self.app.store.load()
+        self.assertEqual(set(state["wallets"]), {"daily", "secondary"})
+        self.assertEqual(state["default_wallet"], "daily")
+        self.assertEqual(self.app.active_wallet_alias(), "daily")
+        with self.assertRaisesRegex(WalletCliError, "already exists"):
+            execute(["wallet", "rename", "daily", "secondary"], self.app)
+        with self.assertRaisesRegex(WalletCliError, "must differ"):
+            execute(["wallet", "rename", "daily", "daily"], self.app)
+
+    def test_wallet_delete_removes_the_local_keystore_after_confirmation(self) -> None:
+        keystore = self.add_wallet("primary")
+        declining = self.make_app(answer="no")
+        with self.assertRaisesRegex(WalletCliError, "cancelled"):
+            execute(["wallet", "delete", "primary"], declining)
+        self.assertTrue(keystore.exists())
+
+        deleted = execute(["wallet", "delete", "primary", "--yes"], self.app)
+        self.assertEqual(deleted["alias"], "primary")
+        self.assertFalse(keystore.exists())
+        state = self.app.store.load()
+        self.assertNotIn("primary", state["wallets"])
+        self.assertIsNone(state["default_wallet"])
+
+    def test_history_lists_and_limits_recorded_commands(self) -> None:
+        self.app.history = ["wallet list", "status", "balance"]
+        result = execute(["history"], self.app)
+        self.assertEqual(result["entries"], ["wallet list", "status", "balance"])
+        limited = execute(["history", "2"], self.app)
+        self.assertEqual(limited["entries"], ["status", "balance"])
+        with self.assertRaisesRegex(WalletCliError, "Usage: history"):
+            execute(["history", "zero"], self.app)
+
+    def test_help_topics_and_index(self) -> None:
+        index = execute(["help"], self.app)
+        self.assertIn("COMMANDS", index["text"])
+        topic = execute(["help", "wallet"], self.app)
+        self.assertEqual(topic["topic"], "wallet")
+        self.assertIn("wallet rename", topic["text"])
+        unknown = execute(["help", "nope"], self.app)
+        self.assertIn("No detailed help", unknown["text"])
+        with self.assertRaisesRegex(WalletCliError, "Usage: help"):
+            execute(["help", "wallet", "extra"], self.app)
 
     def test_transaction_inspect_handles_pending_rpc_receipt(self) -> None:
         result = execute(["tx", "inspect", TX_HASH], self.app)

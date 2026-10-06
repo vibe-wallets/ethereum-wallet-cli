@@ -43,10 +43,12 @@ Network mappings are fixed per entrypoint: Ethereum `mainnet` is chain `1`, `tes
 
 - Create or import named wallets, list them, select a wallet for the session, choose a saved default, and inspect wallet metadata. Each entrypoint has its own wallet store.
 - Choose mainnet, testnet, or local Anvil through each entrypoint's fixed network mapping.
-- Read a native coin balance or an ERC-20 balance.
+- Read a native coin balance, an ERC-20 balance, the next nonce, or the current gas price.
+- Refresh a `status` overview of the network, selected wallet, and native balance.
 - Send native coin or an ERC-20 transfer, with a dry-run estimate or an explicit confirmation.
+- Rename or delete local wallet aliases; deletion never touches on-chain funds.
 - Inspect transaction details by transaction hash.
-- Use an interactive shell, direct argv commands, or one-shot `-c` commands; request JSON output with `--json`.
+- Use an interactive shell with Tab completion and persisted history, direct argv commands, or one-shot `-c` commands; request JSON output with `--json`.
 
 The tool does not implement its own cryptography, ABI encoder, or JSON-RPC client. It does not support seed phrases, hardware wallets, arbitrary contract transaction construction, swapping, bridging, staking, or smart-account flows.
 
@@ -59,20 +61,29 @@ wallet list
 wallet use ALIAS
 wallet default ALIAS
 wallet info [ALIAS]
+wallet rename OLD NEW
+wallet delete ALIAS [--yes]
 address [ALIAS]
 chain list
 chain info [mainnet|testnet|local]
+status
 balance [ADDRESS]
-send DESTINATION AMOUNT [--dry-run | --yes]
+nonce [ADDRESS]
+gas
 token balance CONTRACT [ADDRESS]
+send DESTINATION AMOUNT [--dry-run | --yes]
 token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
 tx inspect HASH
+history [COUNT]
+help [TOPIC]
 clear
 ```
 
 The top-level options are `-c 'COMMAND'` / `--command 'COMMAND'` for a one-shot command, `--network mainnet|testnet|local` to choose a profile-supported network, `--rpc-url URL` to override its RPC endpoint, `--json` for JSON output, `--config-dir PATH` for an explicit state directory, and `--version`. Direct command arguments are also supported; when no command is supplied, the CLI opens its interactive shell. JSON output is available for one-shot commands only. Fresh invocations default to the entrypoint's mainnet; a selected network applies to that invocation or shell only.
 
-`wallet use ALIAS` selects the wallet for the current session; `wallet default ALIAS` stores the profile's saved wallet default. Wallet defaults are separate between the Ethereum and Monad profiles.
+`wallet use ALIAS` selects the wallet for the current session; `wallet default ALIAS` stores the profile's saved wallet default. Wallet defaults are separate between the Ethereum and Monad profiles. `wallet rename` renames a local alias, and `wallet delete` removes a local encrypted keystore after confirmation; neither touches on-chain funds.
+
+In the interactive shell, Tab completes commands, subcommands, networks, flags, and wallet aliases, and `history` shows recent commands. Run `help TOPIC` (for example `help wallet` or `help send`) for focused usage. History is stored as plain command text in the profile's config directory.
 
 After each command succeeds or fails, the CLI prints the underlying Foundry Cast invocations to standard error, including chain checks, simulations, and sends. Local commands explicitly report when no external command ran. Custom and local RPC URLs are masked in the trace; bundled public endpoint URLs remain visible. Private keys and passphrases are never printed. With `--json`, standard output remains the JSON result; standard error may contain the trace or error details.
 

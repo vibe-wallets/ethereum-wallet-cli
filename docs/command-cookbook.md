@@ -34,7 +34,15 @@ address
 address savings
 ```
 
-Wallet aliases and addresses are public metadata. `wallet info` does not reveal the private key.
+Wallet aliases and addresses are public metadata. `wallet info` does not reveal the private key. Rename or delete a local alias with:
+
+```text
+wallet rename spending daily
+wallet delete savings
+wallet delete savings --yes
+```
+
+Deletion removes only the local encrypted keystore; on-chain funds are unaffected. It asks for confirmation unless `--yes` is given.
 
 ## Select a network
 
@@ -68,7 +76,16 @@ token balance 0xTokenContract
 token balance 0xTokenContract 0xOtherAddress
 ```
 
-The optional address selects which account to query; it does not change which wallet signs. Token balances are queried using the token contract on the currently selected chain.
+The optional address selects which account to query; it does not change which wallet signs. Token balances are queried using the token contract on the currently selected chain. Related read-only commands are:
+
+```text
+status
+nonce
+nonce 0xOtherAddress
+gas
+```
+
+`status` verifies the network and shows the selected wallet, address, and native balance. `nonce` shows the next transaction nonce (counting pending transactions). `gas` shows the current gas price in wei and gwei; it is an estimate, not a fee guarantee.
 
 ## Simulate and send native coin
 
@@ -101,15 +118,21 @@ tx inspect 0xTransactionHash
 
 A transaction can be pending, replaced, dropped, or reverted. A submitted hash is evidence that the node accepted a broadcast request, not proof of final success. Query it again if its status is still pending.
 
-## Shell utilities
+## Shell utilities and completion
 
 ```text
 help
+help wallet
+help send
+history
+history 50
 clear
 exit
 ```
 
-`help` prints the command index, `clear` resets the interactive terminal, and `exit` (or `quit`) leaves the shell. Human output uses aligned labels, section titles, and tables with ANSI color on an interactive terminal; color is suppressed for redirected output and when `NO_COLOR` is set or `TERM=dumb`, so copied output stays plain. In one-shot JSON mode, `clear` returns `{"ok": true, "cleared": true}` instead of writing terminal control sequences.
+`help` prints a sectioned command index; `help TOPIC` prints focused usage for a command such as `wallet`, `chain`, `status`, `send`, `token`, `tx`, `address`, `balance`, `nonce`, `gas`, or `history`. The interactive shell completes commands, subcommands, network names, transfer flags, and wallet aliases when you press Tab, and the up/down arrow keys recall earlier commands. `history` shows recent commands (default 20); the history file stores plain command text in the profile's config directory. `clear` resets the interactive terminal, and `exit` (or `quit`) leaves the shell.
+
+Human output uses aligned labels, section titles, and tables with ANSI color on an interactive terminal; color is suppressed for redirected output and when `NO_COLOR` is set or `TERM=dumb`, so copied output stays plain. In one-shot JSON mode, `clear` returns `{"ok": true, "cleared": true}` instead of writing terminal control sequences.
 
 ## Supported network mapping
 

@@ -37,6 +37,20 @@ Added after the release fix
   the Dockerfile: module and function docstrings, wrapped lines, grouped sections,
   and explanatory comments. No behavior change; the same validation passes.
 
+Interactive usability and new commands
+
+- Tab completion for commands, subcommands, networks, transfer flags, and wallet
+  aliases, wired through GNU readline in the interactive shell, plus persisted
+  command history and `history [COUNT]`.
+- New read-only commands: `status` (network, wallet, native balance), `nonce
+  [ADDRESS]`, and `gas`.
+- New local wallet commands: `wallet rename OLD NEW` and `wallet delete ALIAS
+  [--yes]`, which deregisters the alias and then removes the encrypted keystore;
+  on-chain funds are never touched.
+- Reworked `help [TOPIC]` into a sectioned index plus focused topics.
+- Validation: 97 offline tests, `make test-integration`, and `make test-docker`
+  (including a real-PTY tab-completion and new-command flow) all pass locally.
+
 Distribution decision and delivery fix
 - The GHCR package is distributed privately. The `publish` job publishes the immutable
   commit-SHA image; `published-e2e` and `default-image-e2e` grant `packages: read` to

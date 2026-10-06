@@ -158,6 +158,80 @@ class ClearAndRenderTests(unittest.TestCase):
         self.assertIn("Balance: 2.000000000000000001", text)
         self.assertIn("MAINNET · REAL FUNDS", text)
 
+    def test_status_gas_nonce_and_history_render_pretty(self):
+        status = io.StringIO()
+        _render_human(
+            {
+                "command": "status",
+                "profile": "ethereum",
+                "network": "mainnet",
+                "chain_id": 1,
+                "rpc_url": "https://ethereum-rpc.publicnode.com",
+                "wallet": "daily",
+                "address": "0x" + "11" * 20,
+                "balance_native": "1.5",
+            },
+            status,
+        )
+        self.assertIn("STATUS", status.getvalue())
+        self.assertIn("MAINNET · REAL FUNDS", status.getvalue())
+        self.assertIn("Balance : 1.5", status.getvalue())
+
+        gas = io.StringIO()
+        _render_human(
+            {
+                "command": "gas",
+                "chain": "testnet",
+                "chain_id": 11155111,
+                "gas_price_wei": "1500000000",
+                "gas_price_gwei": "1.5",
+            },
+            gas,
+        )
+        self.assertIn("GAS", gas.getvalue())
+        self.assertIn("Gas price: 1.5 gwei", gas.getvalue())
+
+        nonce = io.StringIO()
+        _render_human(
+            {
+                "command": "nonce",
+                "chain": "local",
+                "address": "0x" + "22" * 20,
+                "nonce": "7",
+            },
+            nonce,
+        )
+        self.assertIn("NONCE", nonce.getvalue())
+        self.assertIn("Nonce  : 7", nonce.getvalue())
+
+        history = io.StringIO()
+        _render_human(
+            {"command": "history", "count": 20, "entries": ["wallet list", "status"]},
+            history,
+        )
+        self.assertIn("HISTORY", history.getvalue())
+        self.assertIn("1  wallet list", history.getvalue())
+
+    def test_wallet_rename_and_delete_render_confirmations(self):
+        renamed = io.StringIO()
+        _render_human(
+            {
+                "command": "wallet rename",
+                "old_alias": "primary",
+                "alias": "daily",
+                "address": "0x" + "11" * 20,
+            },
+            renamed,
+        )
+        self.assertIn("renamed to 'daily'", renamed.getvalue())
+
+        deleted = io.StringIO()
+        _render_human(
+            {"command": "wallet delete", "alias": "daily", "address": "0x" + "11" * 20},
+            deleted,
+        )
+        self.assertIn("deleted locally", deleted.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
