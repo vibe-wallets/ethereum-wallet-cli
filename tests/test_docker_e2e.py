@@ -236,7 +236,7 @@ class DockerAnvilSandbox:
 class LauncherShell:
     """PTY driver that exercises the exact interactive launcher and hides secrets."""
 
-    PROMPT = re.compile(rb"(?:ethereum|monad)\[mainnet\]\([^)]+\)> $")
+    PROMPT = re.compile(rb"(?:ethereum|monad)\[[^\]]*\]\([^)]*\)> $")
 
     def __init__(self, argv: list[str], environment: dict[str, str]):
         self.pid, self.terminal = pty.fork()
@@ -472,6 +472,9 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             self.assertIn("Commands:", help_output)
             self.assertIn("No external command ran", help_output)
 
+            cleared = shell.command("clear")
+            self.assertIn("No external command ran", cleared)
+
             created = shell.command(
                 "wallet new generated",
                 prompts=[(b"Enter secret:", password)],
@@ -510,8 +513,8 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
                 self.assertNotIn(private_key[2:].lower(), keystore.read_text().lower())
 
             listed = shell.command("wallet list")
-            self.assertIn("generated:", listed)
-            self.assertIn("imported:", listed)
+            self.assertIn("generated", listed)
+            self.assertIn("imported", listed)
             self.assertIn("[default]", listed)
             self.assertIn("[current]", listed)
             self.assertIn("No external command ran", listed)
@@ -525,8 +528,9 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             defaulted = shell.command("wallet default imported")
             self.assertIn("Wallet 'imported' selected", defaulted)
             info = shell.command("wallet info")
-            self.assertIn("Alias: imported", info)
-            self.assertIn("Encrypted keystore:", info)
+            self.assertIn("Alias", info)
+            self.assertIn("imported", info)
+            self.assertIn("Encrypted keystore", info)
             self.assertIn("No external command ran", info)
 
             chain_list = shell.command("chain list")
@@ -536,7 +540,8 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
                 chain_list,
             )
             chain_info = shell.command("chain info")
-            self.assertIn(f"mainnet: chain {chain_id}", chain_info)
+            self.assertIn("mainnet", chain_info)
+            self.assertIn(str(chain_id), chain_info)
             self.assertIn("No external command ran", chain_info)
             other_profile = "monad" if profile == "ethereum" else "ethereum"
             rejected_chain = shell.command(f"chain info {other_profile}")
@@ -544,24 +549,25 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             self.assertIn("No external command ran", rejected_chain)
 
             balance = shell.command("balance")
-            self.assertIn(
-                f"native balance for {account.lower()} on mainnet: 10000", balance.lower()
-            )
+            self.assertIn("native balance", balance.lower())
+            self.assertIn(account.lower(), balance.lower())
+            self.assertIn("mainnet", balance.lower())
+            self.assertIn("10000", balance)
             self._assert_cast_sequence(balance, ["chain-id", "rpc"])
 
             token_balance = shell.command(f"token balance {TOKEN}")
-            self.assertIn(
-                f"token balance for {account.lower()} on mainnet: 12.345",
-                token_balance.lower(),
-            )
+            self.assertIn("token balance", token_balance.lower())
+            self.assertIn(account.lower(), token_balance.lower())
+            self.assertIn("mainnet", token_balance.lower())
+            self.assertIn("12.345", token_balance)
             self._assert_cast_sequence(token_balance, ["chain-id", "call", "chain-id", "call"])
             self.assertEqual(sandbox.token_balance(node_alias, account), TOKEN_INITIAL_BALANCE)
 
             initial_nonce = sandbox.transaction_count(node_alias, account)
             initial_native_balance = sandbox.native_balance(node_alias, account)
             dry_run = shell.command(f"send {DESTINATION} 0.1 --dry-run")
-            self.assertIn("Dry run", dry_run)
-            self.assertIn("estimated gas", dry_run)
+            self.assertIn("transaction preview", dry_run.lower())
+            self.assertIn("estimated gas", dry_run.lower())
             self._assert_cast_sequence(dry_run, ["chain-id", "estimate"])
             self.assertEqual(sandbox.transaction_count(node_alias, account), initial_nonce)
             self.assertEqual(sandbox.native_balance(node_alias, account), initial_native_balance)
@@ -582,7 +588,7 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             )
             self.assertNotIn(wrong_password, rejected)
             self.assertIn("[wrapper]", rejected)
-            self.assertLess(rejected.lower().index("error:"), rejected.index("[wrapper]"))
+            self.assertLess(rejected.lower().index("error"), rejected.index("[wrapper]"))
             self._assert_cast_sequence(rejected, ["chain-id", "estimate", "chain-id", "send"])
             self.assertEqual(sandbox.transaction_count(node_alias, account), initial_nonce)
             self.assertEqual(sandbox.native_balance(node_alias, account), initial_native_balance)
@@ -606,12 +612,12 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
 
             inspected = shell.command(f"tx inspect {native_hash}")
             self.assertIn(native_hash, inspected)
-            self.assertIn("Receipt:", inspected)
+            self.assertIn("RECEIPT", inspected)
             self.assertIn('"status": "0x1"', inspected)
             self._assert_cast_sequence(inspected, ["chain-id", "tx", "chain-id", "rpc"])
 
             token_dry_run = shell.command(f"token send {TOKEN} {DESTINATION} 1.25 --dry-run")
-            self.assertIn("Dry run", token_dry_run)
+            self.assertIn("transaction preview", token_dry_run.lower())
             self.assertIn("1.25", token_dry_run)
             self._assert_cast_sequence(
                 token_dry_run,
@@ -733,7 +739,8 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
         self.assertNotIn(":8545", output)
 
     def _transaction_hash(self, output: str, prefix: str) -> str:
-        match = re.search(re.escape(prefix) + r" on [^:]+: (0x[0-9a-fA-F]{64})", output)
+        start = output.index(prefix)
+        match = re.search(r"(0x[0-9a-fA-F]{64})", output[start:])
         self.assertIsNotNone(match, output)
         assert match is not None
         return match.group(1)

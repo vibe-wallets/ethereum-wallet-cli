@@ -10,6 +10,18 @@ from typing import Sequence, TextIO
 from .app import HELP_TEXT, Application, execute
 from .chains import PROFILE_NETWORKS
 from .errors import WalletCliError
+from .human import (
+    CLEAR_SCREEN,
+    action_preview,
+    color,
+    format_transaction_receipt,
+    key_value_rows,
+    network_label,
+    section_title,
+    shorten_address,
+    style_help,
+    table,
+)
 
 
 def _parser(
@@ -46,92 +58,161 @@ def _parser(
     return parser
 
 
+def _is_tty(stream: TextIO) -> bool:
+    isatty = getattr(stream, "isatty", None)
+    if not callable(isatty):
+        return False
+    try:
+        return bool(isatty())
+    except (OSError, ValueError):
+        return False
+
+
 def _render_human(result: dict[str, object], output: TextIO | None = None) -> None:
     output = output or sys.stdout
     command = result.get("command")
     if command == "help":
-        print(result.get("text", HELP_TEXT), file=output)
+        print(style_help(result.get("text", HELP_TEXT), stream=output), file=output)
     elif command == "exit":
         return
+    elif command == "clear":
+        if _is_tty(output):
+            output.write(CLEAR_SCREEN)
+            output.flush()
     elif command == "wallet list":
         wallets = result.get("wallets", [])
         if not wallets:
-            print("No wallets. Use 'wallet new ALIAS' or 'wallet import ALIAS'.", file=output)
+            message = "No wallets. Use 'wallet new ALIAS' or 'wallet import ALIAS'."
+            print(color(message, "muted", stream=output), file=output)
         else:
+            rows = []
             for wallet in wallets:
                 markers = []
-                if wallet["current"]:
-                    markers.append("current")
                 if wallet["default"]:
                     markers.append("default")
-                suffix = f" [{', '.join(markers)}]" if markers else ""
-                print(f"{wallet['alias']}: {wallet['address']}{suffix}", file=output)
+                if wallet["current"]:
+                    markers.append("current")
+                tags = f"[{', '.join(markers)}]" if markers else ""
+                rows.append([wallet["alias"], wallet["address"], tags])
+            print(section_title("WALLETS", stream=output), file=output)
+            print(table(rows, ["ALIAS", "ADDRESS", "TAGS"], stream=output), file=output)
     elif command == "chain list":
+        rows = []
         for chain in result.get("chains", []):
-            suffix = " [current]" if chain["current"] else ""
-            print(
-                f"{chain['name']}: chain {chain['chain_id']} · {chain['rpc_url']}{suffix}",
-                file=output,
+            rows.append(
+                [
+                    f"{chain['name']}: chain {chain['chain_id']}",
+                    chain["rpc_url"],
+                    "[current]" if chain["current"] else "",
+                ]
             )
+        print(section_title("NETWORKS", stream=output), file=output)
+        print(table(rows, stream=output), file=output)
+    elif command == "chain info":
+        rows = [
+            ("Network", result["name"]),
+            ("Chain ID", str(result["chain_id"])),
+            ("RPC URL", result["rpc_url"]),
+            ("Current", "yes" if result["current"] else "no"),
+        ]
+        print(section_title("NETWORK", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
     elif command == "balance":
-        print(
-            f"Native balance for {result['address']} on {result['chain']}: {result['balance_native']}",
-            file=output,
-        )
+        rows = [
+            ("Address", result["address"]),
+            ("Network", network_label(str(result["chain"]), stream=output)),
+            ("Balance", result["balance_native"], "emphasis"),
+        ]
+        print(section_title("NATIVE BALANCE", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
     elif command == "token balance":
-        print(
-            f"Token balance for {result['address']} on {result['chain']}: {result['balance']}",
-            file=output,
-        )
+        rows = [
+            ("Contract", result["contract"]),
+            ("Address", result["address"]),
+            ("Network", network_label(str(result["chain"]), stream=output)),
+            ("Decimals", str(result["decimals"])),
+            ("Balance", result["balance"], "emphasis"),
+        ]
+        print(section_title("TOKEN BALANCE", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
     elif command == "send" and result.get("dry_run"):
-        print(
-            f"Dry run on {result['chain']} (chain {result['chain_id']}): send {result['amount']} native units "
-            f"from {result['from_wallet']} ({result['from']}) to {result['to']}; estimated gas {result['estimated_gas']}.",
-            file=output,
+        preview = action_preview(
+            "SEND NATIVE · TRANSACTION PREVIEW",
+            [
+                ("Network", network_label(str(result["chain"]), stream=output)),
+                ("From", f"{result['from_wallet']} ({result['from']})"),
+                ("To", result["to"]),
+                ("Amount", result["amount"], "emphasis"),
+                ("Estimated gas", str(result["estimated_gas"])),
+            ],
+            stream=output,
         )
+        print(preview, file=output)
     elif command == "token send" and result.get("dry_run"):
-        print(
-            f"Dry run on {result['chain']} (chain {result['chain_id']}): send {result['amount']} token units "
-            f"from {result['from_wallet']} ({result['from']}) to {result['to']} through {result['contract']}; "
-            f"estimated gas {result['estimated_gas']}.",
-            file=output,
+        preview = action_preview(
+            "SEND TOKEN · TRANSACTION PREVIEW",
+            [
+                ("Network", network_label(str(result["chain"]), stream=output)),
+                ("From", f"{result['from_wallet']} ({result['from']})"),
+                ("Contract", result["contract"]),
+                ("To", result["to"]),
+                ("Amount", result["amount"], "emphasis"),
+                ("Decimals", str(result["decimals"])),
+                ("Estimated gas", str(result["estimated_gas"])),
+            ],
+            stream=output,
         )
+        print(preview, file=output)
     elif command == "tx inspect":
+        print(section_title("TRANSACTION", stream=output), file=output)
         if result["pending"]:
-            print(
-                f"Transaction {result['transaction_hash']} is pending on {result['chain']}.",
-                file=output,
-            )
+            message = f"Transaction {result['transaction_hash']} is pending on {result['chain']}."
+            print(color(message, "warning", stream=output), file=output)
         else:
             print(f"Transaction: {result['transaction_hash']} on {result['chain']}", file=output)
             print(json.dumps(result["transaction"], indent=2, sort_keys=True), file=output)
-            print("Receipt:", file=output)
+            print(section_title("RECEIPT", stream=output), file=output)
             print(json.dumps(result["receipt"], indent=2, sort_keys=True), file=output)
     elif command in {"wallet new", "wallet import"}:
-        print(f"Wallet '{result['alias']}' is ready at {result['address']}.", file=output)
-    elif command == "wallet info":
+        ready = f"Wallet '{result['alias']}' is ready"
         print(
-            f"Alias: {result['alias']}\nAddress: {result['address']}\nEncrypted keystore: {result['keystore']}",
+            f"{color(ready, 'success', stream=output)} at {result['address']}.",
             file=output,
         )
+    elif command == "wallet info":
+        rows = [
+            ("Alias", result["alias"]),
+            ("Address", result["address"]),
+            ("Encrypted keystore", result["keystore"]),
+        ]
+        print(section_title("WALLET", stream=output), file=output)
+        print(key_value_rows(rows, stream=output), file=output)
     elif command == "address":
         print(result["address"], file=output)
     elif command in {"wallet use", "wallet default"}:
-        print(f"Wallet '{result['alias']}' selected at {result['address']}.", file=output)
-    elif command == "chain info":
-        suffix = " [current]" if result["current"] else ""
+        selected = f"Wallet '{result['alias']}' selected"
         print(
-            f"{result['name']}: chain {result['chain_id']} · {result['rpc_url']}{suffix}",
+            f"{color(selected, 'success', stream=output)} at {result['address']}.",
             file=output,
         )
     elif command in {"send", "token send"}:
-        label = "Transaction" if command == "send" else "Token transaction"
+        action = "Transaction" if command == "send" else "Token transaction"
+        rows = [
+            ("Wallet", f"{result['wallet']} ({result['from']})"),
+            ("To", result["to"]),
+            ("Amount", result["amount"], "emphasis"),
+            ("Estimated gas", str(result.get("estimated_gas") or "unknown")),
+        ]
         print(
-            f"{label} submitted on {result['chain']}: {result.get('transaction_hash') or 'hash not returned'}",
+            format_transaction_receipt(
+                action=action,
+                network=str(result["chain"]),
+                rows=rows,
+                signature=result.get("transaction_hash"),
+                stream=output,
+            ),
             file=output,
         )
-        if result.get("estimated_gas"):
-            print(f"Estimated gas: {result['estimated_gas']}", file=output)
     else:
         print(json.dumps(result, indent=2, sort_keys=True), file=output)
 
@@ -141,7 +222,8 @@ def _print_error(message: str, *, json_output: bool, output: TextIO | None = Non
     if json_output:
         print(json.dumps({"ok": False, "error": message}, sort_keys=True), file=output)
     else:
-        print(f"error: {message}", file=output)
+        label = color("Error", "error", stream=output)
+        print(f"{label}: {message}", file=output)
 
 
 def _run_one(tokens: list[str], app: Application, *, json_output: bool) -> int:
@@ -160,14 +242,46 @@ def _run_one(tokens: list[str], app: Application, *, json_output: bool) -> int:
         app.cast.flush_trace()
 
 
+def _shell_prompt(app: Application, chain_name: str, wallet_alias: str) -> str:
+    chain_tone = "warning" if chain_name == "mainnet" else "info"
+    wallet_tone = "warning" if wallet_alias == "no-wallet" else "success"
+    chain = color(chain_name, chain_tone, stream=sys.stdout)
+    wallet = color(wallet_alias, wallet_tone, stream=sys.stdout)
+    return f"{app.profile}[{chain}]({wallet})> "
+
+
+def _print_banner(app: Application, state: dict[str, object]) -> None:
+    titles = {"ethereum": "Ethereum Wallet CLI", "monad": "Monad Wallet CLI"}
+    print(section_title(titles.get(app.profile, "Wallet CLI"), stream=sys.stdout))
+    alias = app.active_wallet_alias(state)
+    if alias and alias in state["wallets"]:
+        address = state["wallets"][alias]["address"]
+        print(
+            key_value_rows([("Wallet", f"{alias} ({shorten_address(address)})")], stream=sys.stdout)
+        )
+    else:
+        label = color("Wallet", "muted", stream=sys.stdout)
+        value = color("none selected", "warning", stream=sys.stdout)
+        print(f"{label}: {value}")
+    print(
+        key_value_rows(
+            [("Network", network_label(app.network_name, stream=sys.stdout))],
+            stream=sys.stdout,
+        )
+    )
+    print("Type `help` for commands, or `balance` after selecting a wallet.\n")
+
+
 def _shell(app: Application) -> int:
+    banner_state = app.config()
+    _print_banner(app, banner_state)
     while True:
         try:
             state = app.config()
             app.active_chain(state)
             chain_name = app.network_name
             wallet_alias = app.active_wallet_alias(state) or "no-wallet"
-            line = input(f"{app.profile}[{chain_name}]({wallet_alias})> ")
+            line = input(_shell_prompt(app, chain_name, wallet_alias))
         except EOFError:
             print(file=sys.stdout)
             return 0

@@ -101,6 +101,16 @@ tx inspect 0xTransactionHash
 
 A transaction can be pending, replaced, dropped, or reverted. A submitted hash is evidence that the node accepted a broadcast request, not proof of final success. Query it again if its status is still pending.
 
+## Shell utilities
+
+```text
+help
+clear
+exit
+```
+
+`help` prints the command index, `clear` resets the interactive terminal, and `exit` (or `quit`) leaves the shell. Human output uses aligned labels, section titles, and tables with ANSI color on an interactive terminal; color is suppressed for redirected output and when `NO_COLOR` is set or `TERM=dumb`, so copied output stays plain. In one-shot JSON mode, `clear` returns `{"ok": true, "cleared": true}` instead of writing terminal control sequences.
+
 ## Supported network mapping
 
 The `--network` values map to these fixed chains:

@@ -284,6 +284,10 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
         raise WalletCliError("Enter a command. Use 'help' to see the command list.")
     if tokens[0] in {"help", "--help", "-h"}:
         return {"command": "help", "text": HELP_TEXT}
+    if tokens[0] == "clear":
+        if len(tokens) != 1:
+            raise WalletCliError("Usage: clear.")
+        return {"command": "clear", "cleared": True}
     if tokens[0] in {"exit", "quit"}:
         return {"command": "exit"}
 
@@ -647,7 +651,7 @@ HELP_TEXT = """Commands:
   token balance CONTRACT [ADDRESS]
   token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
   tx inspect HASH
-  help | exit | quit
+  help | clear | exit | quit
 
 Amounts are exact decimal strings. Sends require an interactive terminal to unlock
 the encrypted keystore; --yes skips the transaction confirmation prompt.

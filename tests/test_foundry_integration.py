@@ -359,10 +359,9 @@ class FoundryAnvilIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(native_send[0], 0, native_send[1])
         self.assertNotIn(import_password, native_send[1])
-        self.assertIn("Transaction submitted on local", native_send[1])
-        native_match = re.search(
-            r"Transaction submitted on local: (0x[0-9a-fA-F]{64})", native_send[1]
-        )
+        self.assertIn("Transaction submitted", native_send[1])
+        native_start = native_send[1].index("Transaction submitted")
+        native_match = re.search(r"(0x[0-9a-fA-F]{64})", native_send[1][native_start:])
         self.assertIsNotNone(native_match, native_send[1])
         self.assertEqual(
             int(_rpc(self.rpc_url, "eth_getBalance", [destination, "latest"]), 16),
@@ -429,10 +428,9 @@ class FoundryAnvilIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(token_send[0], 0, token_send[1])
         self.assertNotIn(import_password, token_send[1])
-        self.assertIn("Token transaction submitted on local", token_send[1])
-        token_match = re.search(
-            r"Token transaction submitted on local: (0x[0-9a-fA-F]{64})", token_send[1]
-        )
+        self.assertIn("Token transaction submitted", token_send[1])
+        token_start = token_send[1].index("Token transaction submitted")
+        token_match = re.search(r"(0x[0-9a-fA-F]{64})", token_send[1][token_start:])
         self.assertIsNotNone(token_match, token_send[1])
         self.assertEqual(
             int(_rpc(self.rpc_url, "eth_getTransactionCount", [imported_address, "latest"]), 16),

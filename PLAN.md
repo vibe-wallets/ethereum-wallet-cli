@@ -21,6 +21,19 @@ Verified release
   `scripts/monad-wallet-cli`) pulled `:main` and returned correct `chain list` /
   `chain info` JSON with the wrapper trace on stderr.
 
+Added after the release fix
+
+- `clear` command: resets the interactive terminal; in one-shot JSON mode it returns
+  `{"ok": true, "cleared": true}`. It is handled locally, so the trace reports that no
+  external command ran.
+- Pretty human output ported from the sibling Solana wallet CLI: section titles,
+  aligned key/value rows, tables with a narrow-terminal fallback, real-fund network
+  labels, styled help, and a styled interactive prompt/banner. ANSI color is used only
+  on a TTY and is disabled by `NO_COLOR` or `TERM=dumb`, so JSON and piped output stay
+  plain.
+- Validation: 83 offline tests (the prior 69 plus 14 new in `tests/test_human.py`),
+  `make test-integration`, and `make test-docker` all pass locally with the new output.
+
 Distribution decision and delivery fix
 - The GHCR package is distributed privately. The `publish` job publishes the immutable
   commit-SHA image; `published-e2e` and `default-image-e2e` grant `packages: read` to

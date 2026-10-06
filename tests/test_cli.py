@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,11 @@ from evm_wallet.cli import main, monad_main
 from evm_wallet.config import ConfigStore
 
 ROOT = Path(__file__).resolve().parents[1]
+ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def strip_ansi(value: str) -> str:
+    return ANSI_RE.sub("", value)
 
 
 class TTYStringIO(io.StringIO):
@@ -82,7 +88,8 @@ class CliTests(unittest.TestCase):
                 ["--config-dir", str(self.config_dir), "--network", "testnet", "chain", "info"]
             )
         self.assertEqual(exit_code, 0)
-        self.assertIn("testnet: chain 11155111", first.getvalue())
+        self.assertIn("Network : testnet", first.getvalue())
+        self.assertIn("Chain ID: 11155111", first.getvalue())
 
         second = io.StringIO()
         with redirect_stdout(second), redirect_stderr(io.StringIO()):
@@ -90,7 +97,8 @@ class CliTests(unittest.TestCase):
                 ["--config-dir", str(self.config_dir), "--network", "testnet", "-c", "chain info"]
             )
         self.assertEqual(exit_code, 0)
-        self.assertIn("testnet: chain 11155111", second.getvalue())
+        self.assertIn("Network : testnet", second.getvalue())
+        self.assertIn("Chain ID: 11155111", second.getvalue())
 
     def test_interactive_shell_splits_quoted_command_and_handles_bad_input(self) -> None:
         shell_input = TTYStringIO("made-up command\nchain info\nexit\n")
@@ -107,8 +115,9 @@ class CliTests(unittest.TestCase):
             exit_code = main(["--config-dir", str(self.config_dir)])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("mainnet: chain 1", shell_output.getvalue())
-        self.assertIn("ethereum[mainnet](no-wallet)>", shell_output.getvalue())
+        shell_text = strip_ansi(shell_output.getvalue())
+        self.assertIn("mainnet", shell_text)
+        self.assertIn("ethereum[mainnet](no-wallet)>", shell_text)
         self.assertIn("Unknown command", shell_error.getvalue())
 
     def test_json_mode_without_a_one_shot_command_is_rejected(self) -> None:
@@ -141,8 +150,10 @@ class CliTests(unittest.TestCase):
             with redirect_stdout(monad_output), redirect_stderr(io.StringIO()):
                 self.assertEqual(monad_main(["-c", "chain info"]), 0)
 
-        self.assertIn("mainnet: chain 1", evm_output.getvalue())
-        self.assertIn("mainnet: chain 143", monad_output.getvalue())
+        self.assertIn("Network : mainnet", evm_output.getvalue())
+        self.assertIn("Chain ID: 1\n", evm_output.getvalue())
+        self.assertIn("Network : mainnet", monad_output.getvalue())
+        self.assertIn("Chain ID: 143", monad_output.getvalue())
         self.assertNotEqual(evm_dir, monad_dir)
         self.assertEqual(evm_store.config_path.read_bytes(), evm_before)
         self.assertEqual(monad_store.config_path.read_bytes(), monad_before)
@@ -164,13 +175,12 @@ class CliTests(unittest.TestCase):
             with redirect_stdout(monad_output), redirect_stderr(io.StringIO()):
                 self.assertEqual(monad_main(["-c", "chain info"]), 0)
 
-        self.assertIn(
-            "testnet: chain 11155111 · https://ethereum-env.example.invalid/rpc",
-            evm_output.getvalue(),
-        )
-        self.assertIn(
-            "testnet: chain 10143 · https://monad-env.example.invalid/rpc", monad_output.getvalue()
-        )
+        self.assertIn("Network : testnet", evm_output.getvalue())
+        self.assertIn("Chain ID: 11155111", evm_output.getvalue())
+        self.assertIn("https://ethereum-env.example.invalid/rpc", evm_output.getvalue())
+        self.assertIn("Network : testnet", monad_output.getvalue())
+        self.assertIn("Chain ID: 10143", monad_output.getvalue())
+        self.assertIn("https://monad-env.example.invalid/rpc", monad_output.getvalue())
 
     def test_cli_flags_override_entrypoint_environment_without_saving_selection(self) -> None:
         config = self.config_dir
@@ -206,7 +216,9 @@ class CliTests(unittest.TestCase):
             )
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("mainnet: chain 1 · http://127.0.0.1:8545", output.getvalue())
+        self.assertIn("Network : mainnet", output.getvalue())
+        self.assertIn("Chain ID: 1\n", output.getvalue())
+        self.assertIn("http://127.0.0.1:8545", output.getvalue())
         self.assertEqual(store.config_path.read_bytes(), before)
 
     def test_same_wallet_alias_is_independent_in_each_entrypoint_store(self) -> None:
@@ -243,9 +255,11 @@ class CliTests(unittest.TestCase):
             with redirect_stdout(monad_output), redirect_stderr(io.StringIO()):
                 self.assertEqual(monad_main(["-c", "wallet list"]), 0)
 
-        self.assertIn(f"primary: {evm_address}", evm_output.getvalue())
+        self.assertIn("primary", evm_output.getvalue())
+        self.assertIn(evm_address, evm_output.getvalue())
         self.assertNotIn(monad_address, evm_output.getvalue())
-        self.assertIn(f"primary: {monad_address}", monad_output.getvalue())
+        self.assertIn("primary", monad_output.getvalue())
+        self.assertIn(monad_address, monad_output.getvalue())
         self.assertNotIn(evm_address, monad_output.getvalue())
 
     def test_network_selector_cannot_cross_the_entrypoint_profile(self) -> None:

@@ -67,6 +67,7 @@ send DESTINATION AMOUNT [--dry-run | --yes]
 token balance CONTRACT [ADDRESS]
 token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
 tx inspect HASH
+clear
 ```
 
 The top-level options are `-c 'COMMAND'` / `--command 'COMMAND'` for a one-shot command, `--network mainnet|testnet|local` to choose a profile-supported network, `--rpc-url URL` to override its RPC endpoint, `--json` for JSON output, `--config-dir PATH` for an explicit state directory, and `--version`. Direct command arguments are also supported; when no command is supplied, the CLI opens its interactive shell. JSON output is available for one-shot commands only. Fresh invocations default to the entrypoint's mainnet; a selected network applies to that invocation or shell only.
@@ -74,6 +75,8 @@ The top-level options are `-c 'COMMAND'` / `--command 'COMMAND'` for a one-shot 
 `wallet use ALIAS` selects the wallet for the current session; `wallet default ALIAS` stores the profile's saved wallet default. Wallet defaults are separate between the Ethereum and Monad profiles.
 
 After each command succeeds or fails, the CLI prints the underlying Foundry Cast invocations to standard error, including chain checks, simulations, and sends. Local commands explicitly report when no external command ran. Custom and local RPC URLs are masked in the trace; bundled public endpoint URLs remain visible. Private keys and passphrases are never printed. With `--json`, standard output remains the JSON result; standard error may contain the trace or error details.
+
+Human output uses aligned labels, section titles, and tables, plus ANSI color on an interactive terminal. Color is disabled for redirected output and when `NO_COLOR` is set or `TERM=dumb`, so piping and JSON mode stay plain. `clear` resets the screen in an interactive shell and reports `{"ok": true, "cleared": true}` in JSON mode.
 
 See [the command cookbook](docs/command-cookbook.md) for complete examples and [getting started](docs/getting-started.md) for the initial setup. Run either wrapper with `--help`, or use `help` inside the shell.
 
