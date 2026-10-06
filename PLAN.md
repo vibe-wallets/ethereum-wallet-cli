@@ -14,8 +14,25 @@ Implemented and locally validated:
 - CI publishing and fresh-runner registry-pull gate; local/remote delivery verification.
 - Updated onboarding/development docs and regression rules in AGENTS.md.
 
-Remaining: commit/push this coherent fix, monitor the publication workflow, run
-the pulled-image E2E locally after release, and verify ordinary default launchers.
+Committed/pushed delivery fix: 7fd5d6364b8fa0c832ed07bb7ebc7e52e9aa0c06.
+Run https://github.com/vibe-wallets/ethereum-wallet-cli/actions/runs/37519302657:
+- test and publish passed.
+- published-e2e failed because GHCR created the package private; anonymous pull denied.
+- promote and default-image-e2e skipped; main/latest were NOT published.
+- The SHA image pulls with existing local Docker credentials and the full pulled-image
+  E2E passed locally (25.017s), including both actual interactive wallet launchers.
+
+Resolved in the release workflow: the `publish` job now makes the container package
+publicly readable with the workflow's own `GITHUB_TOKEN` (`packages: write`) and then
+requires an anonymous `docker manifest inspect` to succeed before the job completes.
+This removes the manual package-setting step that blocked the first release. The
+`published-e2e` fresh-runner anonymous pull remains the hard gate, and `promote`
+still runs only after it passes.
+
+Next: push this workflow fix, monitor the new run, and confirm publish, published-e2e,
+promote, and default-image-e2e all pass before claiming release delivery. If the
+GITHUB_TOKEN visibility call is rejected, the job fails closed and a package
+administrator must set visibility Public as documented in docs/development.md.
 
 Confirmed: previous workflow run37509627072 passed on a718fba, but only local image
 builds and limited wallet-create/chain-info smoke coverage, not registry delivery.
@@ -32,9 +49,11 @@ Local validation actually run:
 - Full actual-launcher Docker E2E passed for both profiles, including encrypted
   signing and exact native/stateful ERC20 balance deltas (18.23s).
 - actionlint 1.7.12 and git diff --check passed.
-- Registry main-tag pull correctly fails today; no image has yet been published.
+- The immutable SHA image is published privately; the anonymous gate correctly failed.
 
 The token fixture uses checksum-verified solc 0.8.30 compilation; source/runtime
 and reproducible compiler input are checked in, no compiler required by CI/tests.
 All private keys are generated in test memory, never checked in. Only /tmp tooling
-was downloaded (Ruff, actionlint, solc); no system installation or home writes.
+was downloaded (Ruff, actionlint, solc); no system installation. SSH automatically
+added GitHub to its default known_hosts on the first push; that file was not manually
+read/edited/removed. Further pushes must use a temporary verified known-hosts file.

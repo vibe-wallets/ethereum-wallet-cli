@@ -62,6 +62,30 @@ jobs:
           digest=$(docker image inspect "$candidate" --format '{{index .RepoDigests 0}}')
           test -n "$digest"
           echo "image=$digest" >> "$GITHUB_OUTPUT"
+      - name: Make the container package publicly readable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH \
+            "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/ethereum-wallet-cli" \
+            -f visibility=public > /dev/null
+      - name: Wait for anonymous registry access
+        env:
+          VERIFIED_IMAGE: ${{ steps.publish.outputs.image }}
+        run: |
+          set -euo pipefail
+          anonymous="$(mktemp -d)"
+          trap 'rm -rf "$anonymous"' EXIT
+          for attempt in $(seq 1 12); do
+            if DOCKER_CONFIG="$anonymous" docker manifest inspect "$VERIFIED_IMAGE" > /dev/null 2>&1; then
+              echo "Anonymous registry access confirmed after attempt $attempt"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Published package is not anonymously readable; refusing to promote.' >&2
+          exit 1
       - name: Remove temporary registry credentials
         if: always()
         run: rm -rf "$DOCKER_CONFIG"

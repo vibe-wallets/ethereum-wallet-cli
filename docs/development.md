@@ -46,7 +46,7 @@ If Anvil runs in a separate Docker container, put it on a user-created network a
 
 The release sequence first builds and validates an image, then publishes that tested artifact under an immutable full-commit-SHA tag. A fresh anonymous runner pulls the exact digest of that SHA-tagged image and reruns the full Docker end-to-end suite, covering both profiles and wallet management, signing, native transfers, fixture-backed ERC-20 transfers, output, and error paths. Only after those checks pass does CI promote that exact image digest to the public `main` and `latest` tags. The moving `main` tag is updated only after the fresh-runner registry test succeeds; a final fresh-runner job pulls and tests the promoted default tag too. To test any published reference yourself, run `make test-published PUBLISHED_IMAGE=...`.
 
-The public registry pull path is designed to work without authentication. CI publication uses the GitHub Actions token and a temporary Docker credential configuration on the runner; it does not write credentials into the repository or developer Docker configuration. This pipeline description does not establish that a tag is currently available; check the successful release workflow before relying on a published image.
+The public registry pull path is designed to work without authentication. CI publication uses the GitHub Actions token and a temporary Docker credential configuration on the runner; it does not write credentials into the repository or developer Docker configuration. The same job makes the container package publicly readable before the anonymous delivery gate. This pipeline description does not establish that a tag is currently available; check the successful release workflow before relying on a published image.
 
 ## Adding another chain profile
 
@@ -61,3 +61,24 @@ Network support is selected through a dedicated executable and config profile. W
 For other feature changes, keep external command invocations as argument arrays, never through a shell string. Never pass key material or passwords in argv or environment variables. Preserve a single source of truth for the fixed network mapping and wallet selection, and use string/integer arithmetic for coin values. No integration test should use public networks, a developer wallet, or live funds.
 
 Foundry's upstream [Cast documentation](https://www.getfoundry.sh/cast/index.html) describes the underlying tool and versioned command behavior.
+
+## First GHCR release: package visibility
+
+GitHub can create a container package as private even when the linked repository is
+public, and repository access inheritance does not by itself establish anonymous
+package access. On the first release the SHA image can publish successfully while an
+anonymous pull is still denied.
+
+The `publish` job now makes the package publicly readable through the workflow's own
+`GITHUB_TOKEN` (which has `packages: write`) and then requires an anonymous
+`docker manifest inspect` to succeed before the job finishes. `published-e2e` runs
+on a fresh runner with an empty Docker configuration, so it can only pass once the
+package is genuinely public. The default `main`/`latest` tags are promoted only
+after that gate, and `default-image-e2e` re-tests the promoted tag. Do not bypass
+these gates to label an inaccessible image as released.
+
+If the visibility call ever fails, a package administrator can open
+[the package settings](https://github.com/orgs/vibe-wallets/packages/container/ethereum-wallet-cli/settings),
+choose **Change visibility → Public**, confirm the package name, and rerun the failed
+workflow jobs. GitHub states that a public package cannot later become private; see
+its [package visibility documentation](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
