@@ -133,7 +133,8 @@ class LauncherTests(unittest.TestCase):
         config = xdg / "ethereum-wallet-cli"
         self.assertTrue(config.is_dir())
         self.assertEqual(config.stat().st_mode & 0o777, 0o700)
-        self.assertIn(f"type=bind,source={config},target=/data", self.calls()[0])
+        self.assertEqual(self.calls()[0], ["pull", "ghcr.io/vibe-wallets/ethereum-wallet-cli:main"])
+        self.assertIn(f"type=bind,source={config},target=/data", self.calls()[1])
 
     def test_monad_launcher_uses_monad_entrypoint_config_and_environment_allowlist(self) -> None:
         config = self.root / "monad config"
@@ -174,10 +175,30 @@ class LauncherTests(unittest.TestCase):
         config = xdg / "monad-wallet-cli"
         self.assertTrue(config.is_dir())
         self.assertEqual(config.stat().st_mode & 0o777, 0o700)
-        call = self.calls()[0]
+        self.assertEqual(self.calls()[0], ["pull", "ghcr.io/vibe-wallets/ethereum-wallet-cli:main"])
+        call = self.calls()[1]
         self.assertIn("--entrypoint", call)
         self.assertIn("monad-wallet-cli", call)
         self.assertIn(f"type=bind,source={config},target=/data", call)
+
+    def test_named_docker_network_is_profile_specific_and_not_forwarded_as_wallet_env(self):
+        result = self.run_launcher(
+            "--version",
+            launcher=MONAD_LAUNCHER,
+            MONAD_WALLET_IMAGE="ethereum-wallet-cli:local",
+            MONAD_WALLET_DOCKER_NETWORK="isolated-monad-test",
+            ETHEREUM_WALLET_DOCKER_NETWORK="wrong-network",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        call = self.calls()[0]
+        self.assertEqual(call[call.index("--network") + 1], "isolated-monad-test")
+        self.assertNotIn("wrong-network", call)
+        self.assertNotIn("MONAD_WALLET_DOCKER_NETWORK", call)
+
+    def test_failed_default_registry_pull_does_not_start_or_build_an_image(self):
+        result = self.run_launcher("--version", DOCKER_PULL_STATUS="19")
+        self.assertEqual(result.returncode, 19)
+        self.assertEqual(self.calls(), [["pull", "ghcr.io/vibe-wallets/ethereum-wallet-cli:main"]])
 
 
 if __name__ == "__main__":

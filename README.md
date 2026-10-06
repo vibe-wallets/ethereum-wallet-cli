@@ -2,16 +2,16 @@
 
 `ethereum-wallet-cli` and `monad-wallet-cli` are small personal command-line wallets for Ethereum and Monad. Both use Foundry Cast for key creation/import, encrypted keystores, signing, RPC requests, and transaction handling. The Docker image packages the CLI with pinned Cast binaries; each wrapper has its own wallet store and fixed network choices.
 
-This repository does not publish a container image. Build it locally, then use the launcher:
+Both launchers pull `ghcr.io/vibe-wallets/ethereum-wallet-cli:main` before starting. No local build is required:
 
 ```bash
-make build
 scripts/ethereum-wallet-cli
-# Or open the Monad-default CLI:
 scripts/monad-wallet-cli
 ```
 
-The build creates `ethereum-wallet-cli:local`. `scripts/ethereum-wallet-cli` opens the Ethereum-default shell; `scripts/monad-wallet-cli` opens the Monad-default shell. The two CLIs use separate state directories and do not share wallet aliases or encrypted keys. By default, Ethereum state lives in `~/.config/ethereum-wallet-cli` and Monad state in `~/.config/monad-wallet-cli` (under `$XDG_CONFIG_HOME` when set). Override them with `ETHEREUM_WALLET_CONFIG_DIR` and `MONAD_WALLET_CONFIG_DIR`, respectively. Each directory is mounted at `/data` inside its disposable container.
+Pull failures stop the launcher instead of running an older cached image. CI promotes the `main` tag only after pulling and testing the published image on a fresh runner. For local development, build with `make build` and explicitly select `ethereum-wallet-cli:local` using the matching profile's image environment variable.
+
+The two CLIs use separate state directories and do not share wallet aliases or encrypted keys. By default, Ethereum state lives in `~/.config/ethereum-wallet-cli` and Monad state in `~/.config/monad-wallet-cli` (under `$XDG_CONFIG_HOME` when set). Override them with `ETHEREUM_WALLET_CONFIG_DIR` and `MONAD_WALLET_CONFIG_DIR`, respectively. Each directory is mounted at `/data` inside its disposable container. `ETHEREUM_WALLET_IMAGE` and `MONAD_WALLET_IMAGE` can select another image independently; the local tag is an explicit developer override.
 
 For a first wallet, enter these commands in the shell. Secret entry happens through Foundry's hidden prompts:
 
@@ -83,7 +83,8 @@ See [the command cookbook](docs/command-cookbook.md) for complete examples and [
 make build              # Build the local Docker image
 make test               # Offline Python tests
 make test-integration   # Build image and run isolated Anvil integration tests
-make test-docker        # Test both actual launchers with disposable wallets
+make test-docker        # Build image and run full Docker end-to-end tests
+make test-published     # Pull and test a published image (no local build)
 make lint               # Ruff, Python compile, and shell syntax checks
 make format            # Format source and tests (Ruff)
 make format-check      # Check Python formatting
@@ -91,7 +92,7 @@ make run ARGS='--help'  # Run the containerized CLI
 make run-monad          # Launch the Monad CLI
 ```
 
-Integration tests use a local Anvil node and test-only keys. They do not contact live networks or use real funds or existing personal wallets. See [developer and test notes](docs/development.md) and [architecture](docs/architecture.md).
+Integration tests use local Anvil nodes, test-only keys, and a test ERC-20 fixture. They do not contact live networks or use real funds or existing personal wallets. See [developer and test notes](docs/development.md) for image-promotion gates and full Docker end-to-end coverage, and [architecture](docs/architecture.md).
 
 ## Security notes
 

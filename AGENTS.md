@@ -14,6 +14,12 @@
   results for the pushed commit. Investigate and fix meaningful failures; never
   report CI as passing while its result is pending or unknown.
 
+- End-to-end validation must pull the published image and exercise both actual
+  wallet launchers and commands inside their interactive shells, including wallet
+  management, balances, native/ERC-20 transfers, signing and failure paths. A local
+  build or wallet-creation smoke test alone does not prove registry delivery. CI
+  must test registry pulls on a fresh runner before promoting default image tags.
+
 ## Scope and wallet isolation
 
 - `ethereum-wallet-cli` defaults to Ethereum mainnet; `monad-wallet-cli` defaults to

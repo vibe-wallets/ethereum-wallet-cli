@@ -1,0 +1,25 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "TestToken.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity 0.8.30;\n\ncontract TestToken {\n    mapping(address => uint256) public balanceOf;\n\n    function decimals() external pure returns (uint8) {\n        return 18;\n    }\n\n    function transfer(address recipient, uint256 amount) external returns (bool) {\n        require(balanceOf[msg.sender] >= amount, \"balance\");\n        balanceOf[msg.sender] -= amount;\n        balanceOf[recipient] += amount;\n        return true;\n    }\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "none"
+    },
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.deployedBytecode.object"
+        ]
+      }
+    }
+  }
+}

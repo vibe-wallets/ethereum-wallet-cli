@@ -2,22 +2,31 @@
 
 This guide uses Docker so the same pinned Foundry Cast tools run on different host systems. Install Docker Engine or Docker Desktop and GNU Make first. No Python package installation is needed for normal use.
 
-## 1. Build the image and start the shell
+## 1. Start the shell
 
-From the repository root:
+The launchers pull the public image `ghcr.io/vibe-wallets/ethereum-wallet-cli:main` before every run, then start the matching command:
 
 ```bash
-make build
 scripts/ethereum-wallet-cli
 # Or open the separate Monad profile:
 scripts/monad-wallet-cli
 ```
 
-The build uses the Foundry image pinned in `Dockerfile`. There is no published image yet, so build it locally before the first launch. Both launchers default to `ethereum-wallet-cli:local`; the Monad launcher invokes the image's `monad-wallet-cli` entrypoint. Set `ETHEREUM_WALLET_IMAGE` or `MONAD_WALLET_IMAGE` to use a different image for that profile; remote images are pulled before each run.
+The image contains both CLI entrypoints. Ethereum and Monad use their own entrypoint, environment prefix, and wallet directory while sharing the same image. Public pulls require no registry login after a published tag is available. If the public tag is not available yet, use a local build explicitly:
+
+```bash
+make build
+ETHEREUM_WALLET_IMAGE=ethereum-wallet-cli:local scripts/ethereum-wallet-cli
+MONAD_WALLET_IMAGE=ethereum-wallet-cli:local scripts/monad-wallet-cli
+```
+
+Set `ETHEREUM_WALLET_IMAGE` or `MONAD_WALLET_IMAGE` to choose a different image for that profile. Remote images are pulled before every run; if that pull fails, the launcher stops instead of using a cached image.
 
 `scripts/ethereum-wallet-cli` opens on Ethereum mainnet; `scripts/monad-wallet-cli` opens on Monad mainnet. They maintain separate wallets, aliases, network settings, and configuration. The default state directories are `~/.config/ethereum-wallet-cli` and `~/.config/monad-wallet-cli` (under `$XDG_CONFIG_HOME` when set). Override them with `ETHEREUM_WALLET_CONFIG_DIR` and `MONAD_WALLET_CONFIG_DIR`, respectively. Both wrappers create the host directory with mode `0700`, run the container with your host UID and GID, mount only that profile's state at `/data`, and use a read-only container filesystem apart from a temporary `/tmp`.
 
 The network choices are fixed for each launcher: Ethereum `mainnet` (chain ID `1`), `testnet`/Sepolia (`11155111`), or local Anvil (`31337`); Monad `mainnet` (`143`), `testnet`/Monad Testnet (`10143`), or local Anvil (`31337`). Use `chain list` or `chain info` to inspect the endpoints for the current profile. Public endpoints can be rate-limited or change; confirm the selected network before sending.
+
+For Anvil running in another Docker container, attach the wallet container to the same user-created Docker network with `ETHEREUM_WALLET_DOCKER_NETWORK` or `MONAD_WALLET_DOCKER_NETWORK`. Then use the Anvil container's network name as the RPC host, for example `--network local --rpc-url http://anvil:8545`. These Docker network variables only set Docker's `--network` option; they are not passed into the wallet. With no variable set, Docker's default network is used. The local endpoint `127.0.0.1:8545` works only when Anvil shares the wallet container's network namespace.
 
 To use a testnet, start with `scripts/ethereum-wallet-cli --network testnet` or `scripts/monad-wallet-cli --network testnet`. `--network local` selects the built-in Anvil endpoint. `--rpc-url URL` overrides the RPC endpoint for that invocation, while the CLI keeps the selected network's fixed chain ID and checks it before RPC operations. Network choices apply to the current run or shell; a new launch starts on that entrypoint's mainnet unless its network environment variable is set.
 

@@ -1,6 +1,8 @@
 # Foundry owns encryption, ABI encoding, RPC and signing. Pin tested tools.
 FROM ghcr.io/foundry-rs/foundry:v1.8.5@sha256:32c8ea9ef052a440cb1620175987a3f49eff8b068a0c6a3d09ebf7f5f9a0e043 AS foundry
 FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
+LABEL org.opencontainers.image.source="https://github.com/vibe-wallets/ethereum-wallet-cli"
+LABEL org.opencontainers.image.description="Foundry-backed Ethereum and Monad wallet CLIs"
 WORKDIR /app
 COPY --from=foundry /usr/local/bin/cast /usr/local/bin/cast
 COPY --from=foundry /usr/local/bin/anvil /usr/local/bin/anvil

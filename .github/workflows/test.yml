@@ -1,10 +1,14 @@
-name: Tests
+name: Tests and published image
 on: [push, pull_request]
 permissions:
   contents: read
+concurrency:
+  group: wallet-ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -14,3 +18,120 @@ jobs:
       - run: make format-check lint test
       - run: make test-integration
       - run: make test-docker
+      - name: Save the tested image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker save ethereum-wallet-cli:local | gzip > wallet-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: wallet-image-${{ github.sha }}
+          path: wallet-image.tar.gz
+          retention-days: 2
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wallet-image-${{ github.sha }}
+      - name: Select runner-temporary Docker configuration
+        run: echo "DOCKER_CONFIG=$RUNNER_TEMP/wallet-registry-auth" >> "$GITHUB_ENV"
+      - name: Configure temporary CI registry credentials
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/ci/registry_auth.py --config-dir "$DOCKER_CONFIG"
+      - name: Publish the tested immutable image
+        id: publish
+        run: |
+          set -euo pipefail
+          gzip -dc wallet-image.tar.gz | docker load
+          candidate="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          docker tag ethereum-wallet-cli:local "$candidate"
+          docker push "$candidate"
+          docker pull "$candidate"
+          digest=$(docker image inspect "$candidate" --format '{{index .RepoDigests 0}}')
+          test -n "$digest"
+          echo "image=$digest" >> "$GITHUB_OUTPUT"
+      - name: Remove temporary registry credentials
+        if: always()
+        run: rm -rf "$DOCKER_CONFIG"
+
+  published-e2e:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Fresh runner and empty Docker config prove public registry delivery.
+    env:
+      PUBLISHED_IMAGE: ${{ needs.publish.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require an uncached anonymous pull and exercise both wallets
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$RUNNER_TEMP/wallet-anonymous-pull"
+          mkdir -m 700 "$DOCKER_CONFIG"
+          if docker image inspect "$PUBLISHED_IMAGE" > /dev/null 2>&1; then
+            echo 'Published image unexpectedly cached before delivery test' >&2
+            exit 1
+          fi
+          make test-published PUBLISHED_IMAGE="$PUBLISHED_IMAGE"
+
+  promote:
+    needs: [publish, published-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERIFIED_IMAGE: ${{ needs.publish.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select runner-temporary Docker configuration
+        run: echo "DOCKER_CONFIG=$RUNNER_TEMP/wallet-registry-auth" >> "$GITHUB_ENV"
+      - name: Configure temporary CI registry credentials
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/ci/registry_auth.py --config-dir "$DOCKER_CONFIG"
+      - name: Promote only the digest that passed registry E2E
+        run: |
+          set -euo pipefail
+          docker pull "$VERIFIED_IMAGE"
+          repository="${VERIFIED_IMAGE%@*}"
+          for tag in main latest; do
+            docker tag "$VERIFIED_IMAGE" "$repository:$tag"
+            docker push "$repository:$tag"
+          done
+      - name: Remove temporary registry credentials
+        if: always()
+        run: rm -rf "$DOCKER_CONFIG"
+
+  default-image-e2e:
+    needs: promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify the default launcher tag from a fresh runner
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$RUNNER_TEMP/wallet-anonymous-pull"
+          mkdir -m 700 "$DOCKER_CONFIG"
+          make test-published PUBLISHED_IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:main"

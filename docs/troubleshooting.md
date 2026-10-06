@@ -6,7 +6,9 @@ Install and start Docker, then verify `docker info` succeeds. Building and launc
 
 ## The launcher says it cannot pull an image
 
-The default local image `ethereum-wallet-cli:local` is not pulled. Build it with `make build`. If `ETHEREUM_WALLET_IMAGE` or `MONAD_WALLET_IMAGE` is set to a remote name, the corresponding launcher pulls that name on every run. Check the image name, network access, and registry access. The wrapper does not silently launch an old cached remote image after a failed pull.
+Both launchers default to `ghcr.io/vibe-wallets/ethereum-wallet-cli:main` and pull it before each run. A pull error means the command did not start. Check network access and the image reference; public pulls should not need login once the tag is published. If the public tag is not available yet, build and explicitly select the local image: `make build`, then `ETHEREUM_WALLET_IMAGE=ethereum-wallet-cli:local scripts/ethereum-wallet-cli` or `MONAD_WALLET_IMAGE=ethereum-wallet-cli:local scripts/monad-wallet-cli`. A remote `ETHEREUM_WALLET_IMAGE` or `MONAD_WALLET_IMAGE` override is also pulled on each run. The wrapper stops after any pull failure instead of silently using a cached image.
+
+To test a published image reference directly, run `make test-published PUBLISHED_IMAGE=ghcr.io/vibe-wallets/ethereum-wallet-cli:<tag>`. This target pulls the image and runs the full Docker end-to-end suite without building locally.
 
 ## Permission denied for wallet files
 

@@ -1,33 +1,40 @@
-# Ethereum and Monad Wallet CLIs — complete
+# Published-image delivery and complete Docker E2E
 
-Implemented: Foundry-backed `ethereum-wallet-cli` and `monad-wallet-cli` with
-independent XDG config folders, environment prefixes and encrypted wallet stores.
-Each command supports fixed mainnet/testnet/local network choices; no cross-chain
-switching or user-configured chain IDs. Future chains require separate entrypoints.
+Problem: CI passed local-build tests but launchers used an unpublished
+`ethereum-wallet-cli:local` default. Users without a local build could not launch.
 
-Features: encrypted named wallets, interactive shell and one-shot JSON mode,
-exact native/ERC20 amounts, chain-ID verification, transfer simulation/estimation,
-confirmation, encrypted signing, validated receipts and pending transaction inspection.
-Every user command prints underlying Cast invocations afterward on stderr; custom
-RPC URLs are masked. AGENTS.md records this and pre-commit formatting requirements.
+Goal: default to published GHCR images; CI must publish, pull the exact image on a
+fresh runner, run full Ethereum/Monad shell and command flows, and only then promote
+that image to the default `main` tag. Keep separate encrypted stores and fixed IDs.
 
-Docker image: `ethereum-wallet-cli:local` contains both entrypoints. Foundry 1.8.5
-and Python 3.12 bases are digest-pinned. Launchers map host UID/GID, isolate config
-mounts, and use read-only filesystems/capability restrictions. README and eight guides
-cover onboarding, commands, networks, backup/restore, security, architecture and tests.
+Implemented and locally validated:
+- Launcher GHCR default, optional per-profile Docker network for isolated test nodes.
+- Complete real-launcher E2E, including local Anvil native/ERC20 signing, error paths,
+  wallet management, interactive shell, JSON and state persistence/isolation.
+- CI publishing and fresh-runner registry-pull gate; local/remote delivery verification.
+- Updated onboarding/development docs and regression rules in AGENTS.md.
 
-Final validation actually run:
-- make format format-check lint test (Ruff 0.16.10): passed; 61 offline tests,
-  with 4 opt-in cases skipped during ordinary offline discovery.
-- make test-integration: passed inside Docker; 64 tests including 3 real local
-  Foundry/Anvil scenarios; Docker-launcher E2E case skipped inside this container.
-  Tests include wallet creation/import, encrypted native/ERC20 signing, wrong password,
-  false-return token, dry-run nonce/balance invariants, receipts and chain mismatch.
-- make test-docker: passed; both actual launchers create disposable encrypted wallets
-  through PTYs, hide passwords, trace after output, select IDs 1/143, and isolate stores.
-- Source lint, shell syntax, Markdown links/anchors and repository acceptance reviewed.
+Remaining: commit/push this coherent fix, monitor the publication workflow, run
+the pulled-image E2E locally after release, and verify ordinary default launchers.
 
-Implementation is complete and pushed to GitHub on `main` at `cd75510`. The GitHub
-Actions Tests workflow passed for that implementation commit.
-No live-funded networks, system package installs or home-folder modifications.
-Development tools were installed/extracted only below /tmp; the Solana reference is unchanged.
+Confirmed: previous workflow run37509627072 passed on a718fba, but only local image
+builds and limited wallet-create/chain-info smoke coverage, not registry delivery.
+No claim of published-image success until the pull/run gate passes.
+
+Constraints: no live funds; use existing local Docker registry credentials, no docker
+login or home config changes. CI registry credentials live only in runner temp files;
+never use GH_TOKEN for GHCR. Runtime code/keystore behavior remains compatible.
+Development Ruff installed in /tmp/wallet-cli-dev only; no system packages installed.
+
+Local validation actually run:
+- Ruff formatting, lint and 69-test offline discovery passed (4 opt-in skips).
+- Docker-contained integration discovery passed (69 tests; Docker E2E skipped).
+- Full actual-launcher Docker E2E passed for both profiles, including encrypted
+  signing and exact native/stateful ERC20 balance deltas (18.23s).
+- actionlint 1.7.12 and git diff --check passed.
+- Registry main-tag pull correctly fails today; no image has yet been published.
+
+The token fixture uses checksum-verified solc 0.8.30 compilation; source/runtime
+and reproducible compiler input are checked in, no compiler required by CI/tests.
+All private keys are generated in test memory, never checked in. Only /tmp tooling
+was downloaded (Ruff, actionlint, solc); no system installation or home writes.

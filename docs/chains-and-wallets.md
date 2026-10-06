@@ -33,7 +33,9 @@ Each launcher starts on its own mainnet by default. Select `--network testnet` o
 
 The `local` endpoint is loopback from the CLI process. In Docker, `127.0.0.1` points inside the wallet container and reaches Anvil only when Anvil shares its network namespace. To reach a host Anvil process, supply a host-reachable endpoint with `--rpc-url` and Docker networking that exposes it.
 
-The Ethereum launcher reads `ETHEREUM_WALLET_NETWORK`, `ETHEREUM_WALLET_RPC_URL`, `ETHEREUM_WALLET_CONFIG_DIR`, and `ETHEREUM_WALLET_IMAGE`. Monad reads `MONAD_WALLET_NETWORK`, `MONAD_WALLET_RPC_URL`, `MONAD_WALLET_CONFIG_DIR`, and `MONAD_WALLET_IMAGE`. CLI options `--network`, `--rpc-url`, and `--config-dir` override the matching environment values. Both launchers use `ethereum-wallet-cli:local` by default. The wrappers do not read host `.env` files automatically.
+The Ethereum launcher reads `ETHEREUM_WALLET_NETWORK`, `ETHEREUM_WALLET_RPC_URL`, `ETHEREUM_WALLET_CONFIG_DIR`, and `ETHEREUM_WALLET_IMAGE`. Monad reads `MONAD_WALLET_NETWORK`, `MONAD_WALLET_RPC_URL`, `MONAD_WALLET_CONFIG_DIR`, and `MONAD_WALLET_IMAGE`. CLI options `--network`, `--rpc-url`, and `--config-dir` override the matching environment values. Both launchers use `ghcr.io/vibe-wallets/ethereum-wallet-cli:main` by default and pull the selected remote image on each run. Use `ethereum-wallet-cli:local` only after `make build` and an explicit profile image override. The wrappers do not read host `.env` files automatically.
+
+For an Anvil instance in another Docker container, optionally set `ETHEREUM_WALLET_DOCKER_NETWORK` or `MONAD_WALLET_DOCKER_NETWORK` to a user-created Docker network name. The launcher passes this value only as Docker's `--network` setting. The wallet process does not receive it as an environment variable. With no setting, Docker uses its default network. Use an RPC URL reachable by the wallet container, for example `http://anvil:8545`; container loopback `127.0.0.1` does not point to the host or another container.
 
 ## Named wallets and defaults
 
