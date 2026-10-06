@@ -1,10 +1,14 @@
+"""A narrow, shell-free subprocess adapter around Foundry's ``cast``."""
+
 from __future__ import annotations
 
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,6 +19,7 @@ INTEGER_RE = re.compile(r"^(?:0x[0-9a-fA-F]+|[0-9]+)$")
 
 
 def parse_integer_output(value: str, label: str) -> int:
+    """Parse a decimal or 0x-prefixed unsigned integer or raise an error."""
     text = value.strip()
     if not INTEGER_RE.fullmatch(text):
         raise FoundryError(f"Foundry returned an invalid {label} value.")
@@ -59,8 +64,6 @@ class CastClient:
         self.trace.clear()
 
     def flush_trace(self) -> None:
-        import sys
-
         sys.stdout.flush()
         if self.trace:
             for command in self.trace:
@@ -78,6 +81,11 @@ class CastClient:
         return env
 
     def run(self, args: list[str], *, interactive: bool = False) -> str:
+        """Run one Cast command and return its trimmed stdout.
+
+        The trace records a redacted form of every invocation. A non-zero exit
+        becomes a :class:`FoundryError` with a bounded, URL-redacted detail.
+        """
         command = [self.executable, *args]
         self.trace.append(self._display_command(command))
         try:
@@ -134,8 +142,6 @@ class CastClient:
 
     @staticmethod
     def _display_command(command: list[str]) -> str:
-        from shlex import join
-
         public_urls = {
             "https://ethereum-rpc.publicnode.com",
             "https://ethereum-sepolia-rpc.publicnode.com",
@@ -146,19 +152,22 @@ class CastClient:
         for index, value in enumerate(shown[:-1]):
             if value == "--rpc-url" and shown[index + 1] not in public_urls:
                 shown[index + 1] = "<redacted-rpc-url>"
-        return join(shown)
+        return shlex.join(shown)
 
     def verify_chain(self, chain: Chain) -> None:
+        """Refuse to continue when the endpoint reports a different chain ID."""
         output = self.run(["chain-id", "--rpc-url", chain.rpc_url])
         actual = parse_integer_output(output, "chain ID")
         if actual != chain.chain_id:
             raise FoundryError(
-                f"RPC endpoint reported chain ID {actual}, but '{chain.name}' is configured for {chain.chain_id}; refusing to continue."
+                f"RPC endpoint reported chain ID {actual}, but '{chain.name}' is configured "
+                f"for {chain.chain_id}; refusing to continue."
             )
 
     def network(
         self, chain: Chain, args: list[str], *, json_output: bool = False, interactive: bool = False
     ) -> str:
+        """Verify the chain, then run a command against its RPC endpoint."""
         self.verify_chain(chain)
         command = [*args, "--rpc-url", chain.rpc_url]
         if json_output:
@@ -169,19 +178,24 @@ class CastClient:
         return self.network(chain, ["rpc", method, *params])
 
     def rpc_integer(self, chain: Chain, method: str, *params: str, label: str) -> int:
+        """Call an RPC method and parse its unsigned integer result."""
         return parse_rpc_integer(self.rpc(chain, method, *params), label)
 
     def call_uint(self, chain: Chain, contract: str, signature: str, *args: str) -> int:
+        """Call a read-only contract function and parse its uint256 result."""
         output = self.network(chain, ["call", contract, signature, *args], json_output=True)
         return parse_rpc_integer(output, "contract call")
 
     def call_raw(self, chain: Chain, contract: str, signature: str, *args: str) -> str:
+        """Call a read-only contract function and return its raw output."""
         return self.network(chain, ["call", contract, signature, *args])
 
     def estimate(self, chain: Chain, args: list[str]) -> str:
+        """Estimate gas for a transaction without signing it."""
         return self.network(chain, ["estimate", *args])
 
     def send(self, chain: Chain, args: list[str]) -> str:
+        """Sign and broadcast a transaction through Cast's encrypted keystore."""
         # Cast prompts on the controlling terminal to unlock the encrypted keystore.
         return self.network(
             chain,
@@ -192,6 +206,7 @@ class CastClient:
 
 
 def parse_rpc_integer(output: str, label: str) -> int:
+    """Accept the numeric shapes Cast returns for RPC reads and parse one uint256."""
     text = output.strip()
     try:
         value = json.loads(text)

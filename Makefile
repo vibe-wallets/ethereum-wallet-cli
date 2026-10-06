@@ -1,10 +1,14 @@
+# Wallet CLI developer interface. Run `make` or `make help` for available targets.
+
 .DEFAULT_GOAL := help
+
 IMAGE ?= ethereum-wallet-cli:local
 PYTHON ?= python3
 RUFF ?= ruff
 PUBLISHED_IMAGE ?= ghcr.io/vibe-wallets/ethereum-wallet-cli:main
 
 .PHONY: help build test test-integration test-docker test-published lint format format-check run run-monad clean
+
 help:
 	@echo 'build              Build Docker image (IMAGE=ethereum-wallet-cli:local)'
 	@echo 'test               Run offline tests'
@@ -17,31 +21,62 @@ help:
 	@echo 'run                Launch Docker wallet shell (ARGS="...")'
 	@echo 'run-monad          Launch Monad wallet shell (ARGS="...")'
 	@echo 'clean              Remove generated Python cache files'
+
+# --- Build and run ----------------------------------------------------------
+
 build:
 	docker build -t $(IMAGE) .
+
+run:
+	ETHEREUM_WALLET_IMAGE=$(IMAGE) scripts/ethereum-wallet-cli $(ARGS)
+
+run-monad:
+	MONAD_WALLET_IMAGE=$(IMAGE) scripts/monad-wallet-cli $(ARGS)
+
+# --- Tests ------------------------------------------------------------------
+
 test:
 	PYTHONPATH=src $(PYTHON) -m unittest discover -s tests -v
+
 test-integration: build
-	docker run --rm --entrypoint python -e PYTHONPATH=/app/src -e WALLET_CLI_INTEGRATION=1 --mount type=bind,source=$(CURDIR)/tests,target=/app/tests,readonly --mount type=bind,source=$(CURDIR)/scripts,target=/app/scripts,readonly $(IMAGE) -m unittest discover -s /app/tests -v
+	docker run --rm \
+		--entrypoint python \
+		-e PYTHONPATH=/app/src \
+		-e WALLET_CLI_INTEGRATION=1 \
+		--mount type=bind,source=$(CURDIR)/tests,target=/app/tests,readonly \
+		--mount type=bind,source=$(CURDIR)/scripts,target=/app/scripts,readonly \
+		$(IMAGE) -m unittest discover -s /app/tests -v
+
 test-docker: build
-	WALLET_CLI_DOCKER_E2E=1 WALLET_CLI_DOCKER_E2E_IMAGE=$(IMAGE) PYTHONPATH=src $(PYTHON) -m unittest discover -s tests -p test_docker_e2e.py -v
+	WALLET_CLI_DOCKER_E2E=1 \
+	WALLET_CLI_DOCKER_E2E_IMAGE=$(IMAGE) \
+	PYTHONPATH=src \
+	$(PYTHON) -m unittest discover -s tests -p test_docker_e2e.py -v
+
 test-published:
 	docker pull $(PUBLISHED_IMAGE)
-	WALLET_CLI_DOCKER_E2E=1 WALLET_CLI_DOCKER_E2E_IMAGE=$(PUBLISHED_IMAGE) PYTHONPATH=src $(PYTHON) -m unittest discover -s tests -p test_docker_e2e.py -v
+	WALLET_CLI_DOCKER_E2E=1 \
+	WALLET_CLI_DOCKER_E2E_IMAGE=$(PUBLISHED_IMAGE) \
+	PYTHONPATH=src \
+	$(PYTHON) -m unittest discover -s tests -p test_docker_e2e.py -v
+
+# --- Lint and format --------------------------------------------------------
+
 lint:
 	$(RUFF) check --config pyproject.toml src tests scripts/ci
 	$(PYTHON) -m compileall -q src tests scripts/ci
 	bash -n scripts/ethereum-wallet-cli scripts/monad-wallet-cli
 	sh -n scripts/container/ethereum-wallet-cli scripts/container/monad-wallet-cli
+
 format:
 	$(RUFF) check --config pyproject.toml --select I --fix src tests scripts/ci
 	$(RUFF) format --config pyproject.toml src tests scripts/ci
+
 format-check:
 	$(RUFF) check --config pyproject.toml --select I src tests scripts/ci
 	$(RUFF) format --config pyproject.toml --check src tests scripts/ci
-run:
-	ETHEREUM_WALLET_IMAGE=$(IMAGE) scripts/ethereum-wallet-cli $(ARGS)
-run-monad:
-	MONAD_WALLET_IMAGE=$(IMAGE) scripts/monad-wallet-cli $(ARGS)
+
+# --- Housekeeping -----------------------------------------------------------
+
 clean:
 	find src tests -type d -name __pycache__ -exec rm -rf {} +

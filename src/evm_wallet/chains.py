@@ -1,3 +1,5 @@
+"""Fixed per-profile network mappings and RPC URL validation."""
+
 from __future__ import annotations
 
 import re
@@ -31,6 +33,7 @@ PROFILE_NETWORKS: dict[str, dict[str, str]] = {
 
 
 def validate_chain_name(name: str) -> str:
+    """Return a valid lowercase chain name or raise a user-facing error."""
     if not CHAIN_NAME_RE.fullmatch(name):
         raise WalletCliError(
             "Chain names must start with a lowercase letter and contain only lowercase "
@@ -40,6 +43,7 @@ def validate_chain_name(name: str) -> str:
 
 
 def validate_chain_id(value: int | str) -> int:
+    """Return a positive chain ID parsed from a decimal or 0x-prefixed value."""
     if isinstance(value, bool) or not isinstance(value, (str, int)):
         raise WalletCliError("Chain ID must be a positive decimal or 0x-prefixed integer.")
     try:
@@ -52,6 +56,7 @@ def validate_chain_id(value: int | str) -> int:
 
 
 def validate_rpc_url(value: str) -> str:
+    """Return a credential-free absolute http(s) RPC URL or raise an error."""
     if not isinstance(value, str):
         raise WalletCliError("RPC URL must be a string.")
     try:
@@ -71,6 +76,7 @@ def validate_rpc_url(value: str) -> str:
 
 
 def chain_from_config(name: str, value: object) -> Chain:
+    """Validate a stored chain entry and return its ``Chain``."""
     if (
         not isinstance(name, str)
         or not isinstance(value, dict)

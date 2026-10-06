@@ -1,3 +1,5 @@
+"""Secure, atomic wallet configuration and keystore metadata storage."""
+
 from __future__ import annotations
 
 import fcntl
@@ -63,6 +65,7 @@ class ConfigStore:
         self.lock_path = self.directory / ".config.lock"
 
     def ensure_directory(self, *, wallets: bool = False) -> None:
+        """Create the config tree with private permissions, rejecting symlinks."""
         try:
             self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             self._ensure_real_directory(self.directory)
@@ -88,6 +91,7 @@ class ConfigStore:
             )
 
     def load(self) -> dict[str, Any]:
+        """Read and validate config.json, returning defaults when it is absent."""
         self._reject_symlink(self.directory, "configuration directory")
         if self.directory.exists():
             self._ensure_real_directory(self.directory)
@@ -114,6 +118,7 @@ class ConfigStore:
         return self._validate_document(data)
 
     def update(self, change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+        """Apply a change under an exclusive lock and write config.json atomically."""
         self.ensure_directory()
         lock_fd: int | None = None
         try:
@@ -142,9 +147,11 @@ class ConfigStore:
                     os.close(lock_fd)
 
     def allocate_keystore_name(self) -> str:
+        """Return a fresh random 32-character hex keystore file name."""
         return secrets.token_hex(16)
 
     def keystore_path(self, wallet: dict[str, Any]) -> Path:
+        """Validate and return the keystore path recorded for a wallet alias."""
         relative = wallet.get("keystore")
         if not isinstance(relative, str) or not KEYSTORE_FILE_RE.fullmatch(relative):
             raise ConfigurationError("Wallet keystore path in config.json is invalid.")
@@ -218,18 +225,33 @@ class ConfigStore:
         }
         if set(document) != expected:
             raise ConfigurationError("config.json contains missing or unknown top-level fields.")
-        if not isinstance(document["chains"], dict) or not isinstance(document["wallets"], dict):
+        chains = document["chains"]
+        wallets = document["wallets"]
+        if not isinstance(chains, dict) or not isinstance(wallets, dict):
             raise ConfigurationError("config.json chains and wallets must be objects.")
-        for name, chain_data in document["chains"].items():
+        ConfigStore._validate_chains(chains)
+        ConfigStore._validate_wallets(wallets)
+        for key in ("default_chain", "current_chain"):
+            name = document[key]
+            if not isinstance(name, str) or name not in chains:
+                raise ConfigurationError(f"config.json {key} refers to an unknown chain.")
+        for key in ("default_wallet", "current_wallet"):
+            alias = document[key]
+            if alias is not None and (not isinstance(alias, str) or alias not in wallets):
+                raise ConfigurationError(f"config.json {key} refers to an unknown wallet.")
+        return document
+
+    @staticmethod
+    def _validate_chains(chains: dict[str, Any]) -> None:
+        for name, chain_data in chains.items():
             try:
                 chain_from_config(name, chain_data)
             except WalletCliError as exc:
                 raise ConfigurationError(str(exc)) from exc
-        for key in ("default_chain", "current_chain"):
-            name = document[key]
-            if not isinstance(name, str) or name not in document["chains"]:
-                raise ConfigurationError(f"config.json {key} refers to an unknown chain.")
-        for alias, metadata in document["wallets"].items():
+
+    @staticmethod
+    def _validate_wallets(wallets: dict[str, Any]) -> None:
+        for alias, metadata in wallets.items():
             if (
                 not isinstance(alias, str)
                 or not ALIAS_RE.fullmatch(alias)
@@ -240,18 +262,9 @@ class ConfigStore:
                 raise ConfigurationError(
                     f"Wallet '{alias}' metadata must contain keystore and address only."
                 )
-            if not isinstance(metadata["keystore"], str) or not KEYSTORE_FILE_RE.fullmatch(
-                metadata["keystore"]
-            ):
+            keystore = metadata["keystore"]
+            if not isinstance(keystore, str) or not KEYSTORE_FILE_RE.fullmatch(keystore):
                 raise ConfigurationError(f"Wallet '{alias}' has an invalid keystore path.")
-            if not isinstance(metadata["address"], str) or not ADDRESS_RE.fullmatch(
-                metadata["address"]
-            ):
+            address = metadata["address"]
+            if not isinstance(address, str) or not ADDRESS_RE.fullmatch(address):
                 raise ConfigurationError(f"Wallet '{alias}' has an invalid address.")
-        for key in ("default_wallet", "current_wallet"):
-            alias = document[key]
-            if alias is not None and (
-                not isinstance(alias, str) or alias not in document["wallets"]
-            ):
-                raise ConfigurationError(f"config.json {key} refers to an unknown wallet.")
-        return document

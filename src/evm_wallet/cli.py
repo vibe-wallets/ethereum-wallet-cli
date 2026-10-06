@@ -1,3 +1,5 @@
+"""Argument parsing, one-shot execution, and the interactive shell."""
+
 from __future__ import annotations
 
 import argparse
@@ -69,6 +71,7 @@ def _is_tty(stream: TextIO) -> bool:
 
 
 def _render_human(result: dict[str, object], output: TextIO | None = None) -> None:
+    """Print one command result in the human-readable style."""
     output = output or sys.stdout
     command = result.get("command")
     if command == "help":
@@ -218,6 +221,7 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
 
 
 def _print_error(message: str, *, json_output: bool, output: TextIO | None = None) -> None:
+    """Print a user-facing error as JSON or as a styled human line."""
     output = output or sys.stderr
     if json_output:
         print(json.dumps({"ok": False, "error": message}, sort_keys=True), file=output)
@@ -227,6 +231,7 @@ def _print_error(message: str, *, json_output: bool, output: TextIO | None = Non
 
 
 def _run_one(tokens: list[str], app: Application, *, json_output: bool) -> int:
+    """Run one command, then flush its Cast trace to stderr."""
     app.cast.clear_trace()
     try:
         result = execute(tokens, app, json_output=json_output)
@@ -243,6 +248,7 @@ def _run_one(tokens: list[str], app: Application, *, json_output: bool) -> int:
 
 
 def _shell_prompt(app: Application, chain_name: str, wallet_alias: str) -> str:
+    """Build the coloured interactive prompt for the selected network and wallet."""
     chain_tone = "warning" if chain_name == "mainnet" else "info"
     wallet_tone = "warning" if wallet_alias == "no-wallet" else "success"
     chain = color(chain_name, chain_tone, stream=sys.stdout)
@@ -251,6 +257,7 @@ def _shell_prompt(app: Application, chain_name: str, wallet_alias: str) -> str:
 
 
 def _print_banner(app: Application, state: dict[str, object]) -> None:
+    """Show the selected wallet and network once when the shell starts."""
     titles = {"ethereum": "Ethereum Wallet CLI", "monad": "Monad Wallet CLI"}
     print(section_title(titles.get(app.profile, "Wallet CLI"), stream=sys.stdout))
     alias = app.active_wallet_alias(state)
@@ -273,6 +280,7 @@ def _print_banner(app: Application, state: dict[str, object]) -> None:
 
 
 def _shell(app: Application) -> int:
+    """Read commands from an interactive terminal until exit or EOF."""
     banner_state = app.config()
     _print_banner(app, banner_state)
     while True:

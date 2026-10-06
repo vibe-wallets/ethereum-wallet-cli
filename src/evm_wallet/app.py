@@ -1,3 +1,5 @@
+"""Command handlers for wallets, balances, transfers, and inspection."""
+
 from __future__ import annotations
 
 import json
@@ -62,6 +64,7 @@ class Application:
         return self.store.load()
 
     def active_chain(self, state: dict[str, Any] | None = None) -> Chain:
+        """Resolve the startup chain and apply any per-run RPC URL override."""
         state = state or self.config()
         name = self.startup_chain
         if name in BUILTIN_CHAINS:
@@ -87,12 +90,14 @@ class Application:
         return chain.name
 
     def active_wallet_alias(self, state: dict[str, Any] | None = None) -> str | None:
+        """Return the session wallet alias, falling back to the saved default."""
         state = state or self.config()
         return self.session_wallet_alias or state.get("default_wallet")
 
     def wallet(
         self, alias: str | None = None, state: dict[str, Any] | None = None
     ) -> tuple[str, dict[str, Any], Path]:
+        """Return (alias, metadata, keystore) for the selected wallet."""
         state = state or self.config()
         selected = alias or self.active_wallet_alias(state)
         if not selected:
@@ -107,6 +112,7 @@ class Application:
         return selected, metadata, keystore
 
     def require_terminal(self, action: str) -> None:
+        """Fail unless stdin and stdout are terminals for a hidden keystore prompt."""
         if not self.stdin.isatty() or not self.stdout.isatty():
             raise WalletCliError(
                 f"'{action}' requires an interactive terminal for Foundry's hidden keystore prompt."
@@ -114,6 +120,7 @@ class Application:
 
     @staticmethod
     def validate_keystore_file(path: Path, *, expected_address: str | None = None) -> str:
+        """Validate a Foundry keystore file and return its normalized address."""
         if path.is_symlink():
             raise ConfigurationError("Wallet keystore cannot be a symlink.")
         try:
@@ -154,6 +161,7 @@ class Application:
         return normalized
 
     def create_wallet(self, alias: str, kind: str) -> dict[str, Any]:
+        """Create or import an encrypted wallet and register it in config."""
         validate_alias(alias)
         self.require_terminal(f"wallet {kind}")
         state = self.config()
@@ -181,7 +189,8 @@ class Application:
                 "--interactive",
             ]
             sys.stderr.write(
-                "Foundry will prompt for the private key and a keystore passphrase; input is hidden.\n"
+                "Foundry will prompt for the private key and a keystore passphrase; "
+                "input is hidden.\n"
             )
         else:
             raise WalletCliError("Wallet operation must be 'new' or 'import'.")
@@ -207,7 +216,8 @@ class Application:
         def add_wallet(config: dict[str, Any]) -> None:
             if alias in config["wallets"]:
                 raise WalletCliError(
-                    f"Wallet alias '{alias}' already exists; the new keystore was preserved as an unregistered file."
+                    f"Wallet alias '{alias}' already exists; the new keystore was "
+                    "preserved as an unregistered file."
                 )
             config["wallets"][alias] = {"keystore": relative, "address": address}
             if config["default_wallet"] is None:
@@ -233,11 +243,13 @@ class Application:
             raise FoundryError(f"Foundry returned an invalid {label} response.") from exc
 
     def contract_uint(self, chain: Chain, contract: str, signature: str, *arguments: str) -> int:
+        """Read a uint256 value from a contract call on the active chain."""
         return self.cast.call_uint(chain, contract, signature, *arguments)
 
     def simulate_erc20_transfer(
         self, chain: Chain, contract: str, sender: str, destination: str, amount: int
     ) -> None:
+        """Simulate an ERC-20 transfer and refuse to sign if it returns false."""
         output = self.cast.call_raw(
             chain,
             contract,
@@ -291,6 +303,7 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
     if tokens[0] in {"exit", "quit"}:
         return {"command": "exit"}
 
+    # Wallet management: create, import, list, select, and inspect.
     if tokens[0] == "wallet":
         if len(tokens) < 2:
             raise WalletCliError(
@@ -352,10 +365,12 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             "Usage: wallet new|import ALIAS, wallet list|use|default|info [ALIAS]."
         )
 
+    # Public address lookup.
     if tokens[0] == "address" and len(tokens) in {1, 2}:
         alias, metadata, _ = app.wallet(tokens[1] if len(tokens) == 2 else None)
         return {"command": "address", "alias": alias, "address": metadata["address"]}
 
+    # Fixed per-profile network inspection.
     if tokens[0] == "chain":
         if len(tokens) < 2:
             raise WalletCliError("Usage: chain list | chain info [mainnet|testnet|local].")
@@ -401,6 +416,7 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             }
         raise WalletCliError("Usage: chain list | chain info [mainnet|testnet|local].")
 
+    # Native coin balance.
     if tokens[0] == "balance" and len(tokens) in {1, 2}:
         state = app.config()
         chain = app.active_chain(state)
@@ -420,6 +436,7 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             "balance_native": format_units(raw, 18),
         }
 
+    # Native coin transfer: estimate, confirm, sign, and broadcast.
     if tokens[0] == "send":
         dry_run = "--dry-run" in tokens
         yes = "--yes" in tokens
@@ -452,8 +469,11 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             }
         if not yes:
             answer = app.input_fn(
-                f"Send {amount} native units on {app.network_label(chain)} (chain ID {chain.chain_id})?\n"
-                f"  from {alias} ({metadata['address']})\n  to   {destination}\n  estimated gas {gas}\n"
+                f"Send {amount} native units on {app.network_label(chain)} "
+                f"(chain ID {chain.chain_id})?\n"
+                f"  from {alias} ({metadata['address']})\n"
+                f"  to   {destination}\n"
+                f"  estimated gas {gas}\n"
                 "Type 'yes' to continue: "
             )
             if answer.strip().lower() != "yes":
@@ -493,6 +513,7 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             "transaction_hash": tx_hash,
         }
 
+    # ERC-20 balance and transfer.
     if tokens[0] == "token" and len(tokens) >= 3:
         action = tokens[1]
         if action == "balance" and len(tokens) in {3, 4}:
@@ -562,9 +583,13 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
                 }
             if not yes:
                 answer = app.input_fn(
-                    f"Send {amount} token units on {app.network_label(chain)} (chain ID {chain.chain_id})?\n"
-                    f"  wallet   {alias} ({metadata['address']})\n  contract {contract}\n"
-                    f"  to       {destination}\n  estimated gas {gas}\nType 'yes' to continue: "
+                    f"Send {amount} token units on {app.network_label(chain)} "
+                    f"(chain ID {chain.chain_id})?\n"
+                    f"  wallet   {alias} ({metadata['address']})\n"
+                    f"  contract {contract}\n"
+                    f"  to       {destination}\n"
+                    f"  estimated gas {gas}\n"
+                    "Type 'yes' to continue: "
                 )
                 if answer.strip().lower() != "yes":
                     raise WalletCliError("Transaction cancelled.")
@@ -587,7 +612,8 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             tx_result, tx_hash, receipt_status = _parse_send_receipt(app, output, "token")
             if receipt_status == 0:
                 raise WalletCliError(
-                    f"Token transaction was mined with a failed status; transaction hash: {tx_hash}."
+                    "Token transaction was mined with a failed status; "
+                    f"transaction hash: {tx_hash}."
                 )
             return {
                 "command": "token send",
@@ -606,9 +632,11 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
                 "transaction_hash": tx_hash,
             }
         raise WalletCliError(
-            "Usage: token balance CONTRACT [ADDRESS] | token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]."
+            "Usage: token balance CONTRACT [ADDRESS] | token send CONTRACT "
+            "DESTINATION AMOUNT [--dry-run | --yes]."
         )
 
+    # Transaction and receipt inspection.
     if tokens[0] == "tx" and len(tokens) == 3 and tokens[1] == "inspect":
         tx_hash = validate_tx_hash(tokens[2])
         chain = app.active_chain()
@@ -662,8 +690,9 @@ def _parse_send_receipt(
     app: Application, output: str, kind: str
 ) -> tuple[dict[str, Any], str, int]:
     uncertainty = (
-        f"Cast did not return a valid {kind} transaction receipt. The transaction may have been broadcast; "
-        "inspect the wallet's recent activity before submitting another transfer."
+        f"Cast did not return a valid {kind} transaction receipt. The transaction may "
+        "have been broadcast; inspect the wallet's recent activity before submitting "
+        "another transfer."
     )
     if not output.strip():
         raise FoundryError(uncertainty)
@@ -691,6 +720,7 @@ def _parse_send_receipt(
     if parsed_status not in {0, 1}:
         raise FoundryError(
             f"Cast returned transaction {tx_hash} without a valid receipt status. "
-            "The transaction may have been broadcast; inspect the wallet's recent activity before submitting another transfer."
+            "The transaction may have been broadcast; inspect the wallet's recent "
+            "activity before submitting another transfer."
         )
     return receipt, tx_hash, parsed_status

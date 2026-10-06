@@ -1,5 +1,7 @@
 """Monad-default entry point with its own configuration and wallet directory."""
 
+from __future__ import annotations
+
 from collections.abc import Sequence
 
 from .cli import monad_main

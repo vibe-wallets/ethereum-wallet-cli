@@ -1,3 +1,5 @@
+"""Exact decimal amount and address validation helpers."""
+
 from __future__ import annotations
 
 import re
@@ -11,18 +13,21 @@ UINT256_MAX = (1 << 256) - 1
 
 
 def validate_address(value: str, label: str = "address") -> str:
+    """Return a 20-byte 0x-prefixed hex address or raise a user-facing error."""
     if not ADDRESS_RE.fullmatch(value):
         raise WalletCliError(f"{label.capitalize()} must be a 20-byte 0x-prefixed hex address.")
     return value
 
 
 def validate_tx_hash(value: str) -> str:
+    """Return a 32-byte 0x-prefixed transaction hash or raise a user-facing error."""
     if not TX_HASH_RE.fullmatch(value):
         raise WalletCliError("Transaction hash must be a 32-byte 0x-prefixed hex value.")
     return value
 
 
 def to_base_units(amount: str, decimals: int) -> int:
+    """Convert an exact decimal string to integer base units without float rounding."""
     if not isinstance(amount, str) or not AMOUNT_RE.fullmatch(amount):
         raise WalletCliError(
             "Amount must be a non-negative decimal string without exponent notation."
@@ -43,6 +48,7 @@ def to_base_units(amount: str, decimals: int) -> int:
 
 
 def format_units(raw_amount: int | str, decimals: int) -> str:
+    """Render integer base units as a trimmed decimal string."""
     value = int(raw_amount)
     if value < 0 or decimals < 0:
         raise ValueError("raw amount and decimals must be non-negative")

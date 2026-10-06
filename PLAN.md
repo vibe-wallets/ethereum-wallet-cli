@@ -33,6 +33,9 @@ Added after the release fix
   plain.
 - Validation: 83 offline tests (the prior 69 plus 14 new in `tests/test_human.py`),
   `make test-integration`, and `make test-docker` all pass locally with the new output.
+- Readability pass across all Python modules, the shell launcher, the Makefile, and
+  the Dockerfile: module and function docstrings, wrapped lines, grouped sections,
+  and explanatory comments. No behavior change; the same validation passes.
 
 Distribution decision and delivery fix
 - The GHCR package is distributed privately. The `publish` job publishes the immutable

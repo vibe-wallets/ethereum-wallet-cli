@@ -58,7 +58,7 @@ Network support is selected through a dedicated executable and config profile. W
 4. Add offline tests for network mappings and store isolation, local Anvil coverage for RPC/signing changes, and launcher coverage in `make test-docker`.
 5. Update the README, chain guide, environment examples, architecture, and troubleshooting notes.
 
-For other feature changes, keep external command invocations as argument arrays, never through a shell string. Never pass key material or passwords in argv or environment variables. Preserve a single source of truth for the fixed network mapping and wallet selection, and use string/integer arithmetic for coin values. No integration test should use public networks, a developer wallet, or live funds.
+For other feature changes, keep external command invocations as argument arrays, never through a shell string. Never pass key material or passwords in argv or environment variables. Preserve a single source of truth for the fixed network mapping and wallet selection, and use string/integer arithmetic for coin values. No integration test should use public networks, a developer wallet, or live funds. Keep Python formatted with the repository's Ruff configuration and the shell launchers formatted with `shfmt -i 2 -ci -bn -sr`.
 
 Foundry's upstream [Cast documentation](https://www.getfoundry.sh/cast/index.html) describes the underlying tool and versioned command behavior.
 
