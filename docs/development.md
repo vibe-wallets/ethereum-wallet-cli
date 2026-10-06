@@ -64,26 +64,23 @@ Foundry's upstream [Cast documentation](https://www.getfoundry.sh/cast/index.htm
 
 ## First GHCR release: package visibility
 
-GitHub can create a container package as private even when the linked repository is
-public, and repository access inheritance does not by itself establish anonymous
-package access. On the first release the SHA image can publish successfully while an
-anonymous pull is still denied.
+The container package is distributed privately. GitHub can create a package as
+private even when the linked repository is public, and repository access inheritance
+does not by itself establish anonymous package access. This project does not try to
+change that from CI: the Actions token can push images but does not reliably hold the
+package-admin rights needed to change visibility, and the transition to public is not
+reversible.
 
-The `publish` job first tries to make the package publicly readable through the
-workflow's own `GITHUB_TOKEN` and reports the resulting visibility. That token can
-push images but is not guaranteed to hold package-admin rights, so this visibility
-call is best-effort and does not fail the release. The `published-e2e` job records
-whether the exact digest is anonymously readable, then pulls it on a fresh runner
-with the workflow token when it is not. The full Docker end-to-end suite still has to
-pass before `promote` publishes `main` and `latest`, and `default-image-e2e` re-tests
-the promoted tag on another fresh runner. Do not bypass these gates to label an
-unreachable image as released.
+Instead, every fresh-runner registry gate authenticates with the runner's temporary
+GitHub Actions token (`packages: read`), and ordinary launchers use the caller's
+existing `ghcr.io` Docker credentials. `published-e2e` records whether the exact
+digest happens to be anonymously readable, then performs the uncached pull and the
+full Docker end-to-end suite. Only after that passes does `promote` publish `main`
+and `latest`, and `default-image-e2e` re-tests the promoted tag on another fresh
+runner. Do not bypass these gates to label an unreachable image as released.
 
-While the package is private, ordinary launchers pull through the caller's existing
-GHCR credentials (the same `~/.docker/config.json` entry that already authenticates
-`ghcr.io`). A package administrator can open
+If anonymous public delivery is ever wanted, a package administrator can open
 [the package settings](https://github.com/orgs/vibe-wallets/packages/container/ethereum-wallet-cli/settings),
 choose **Change visibility → Public**, confirm the package name, and re-run the
-release to restore anonymous pulls. GitHub states that a public package cannot later
-become private; see its
+release. GitHub states that a public package cannot later become private; see its
 [package visibility documentation](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
