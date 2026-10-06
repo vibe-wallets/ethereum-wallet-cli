@@ -1,0 +1,2 @@
+# Development-only formatter; runtime and offline tests use the standard library.
+ruff==0.16.10

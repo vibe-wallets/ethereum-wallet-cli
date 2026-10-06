@@ -1,0 +1,12 @@
+tmp/
+markdown-for-ai/
+claude-code-review-result/
+reference-repos/
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.wallet/
+.env
+env/*.env
+.ruff_cache/

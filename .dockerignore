@@ -1,0 +1,13 @@
+.git
+.git-crypt
+tmp
+markdown-for-ai
+claude-code-review-result
+__pycache__
+*.pyc
+.venv
+.wallet
+.env
+*.egg-info
+.ruff_cache
+env/*.env

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ethereum-wallet-cli"
+version = "0.1.0"
+description = "A small Foundry-backed wallet CLI for Ethereum and Monad"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+ethereum-wallet-cli = "evm_wallet.cli:main"
+monad-wallet-cli = "evm_wallet.cli:monad_main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

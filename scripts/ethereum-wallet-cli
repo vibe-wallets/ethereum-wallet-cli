@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PROFILE=ethereum
+PREFIX=ETHEREUM_WALLET
+ENTRYPOINT_ARGS=()
+if [[ "$(basename "$0")" == "monad-wallet-cli" ]]; then
+  PROFILE=monad
+  PREFIX=MONAD_WALLET
+  ENTRYPOINT_ARGS=(--entrypoint monad-wallet-cli)
+fi
+IMAGE_VAR="${PREFIX}_IMAGE"
+CONFIG_VAR="${PREFIX}_CONFIG_DIR"
+IMAGE="${!IMAGE_VAR:-ethereum-wallet-cli:local}"
+CONFIG_ROOT="${XDG_CONFIG_HOME:-}"
+if [[ "$CONFIG_ROOT" != /* ]]; then CONFIG_ROOT="$HOME/.config"; fi
+CONFIG_DIR="${!CONFIG_VAR:-${CONFIG_ROOT}/${PROFILE}-wallet-cli}"
+if [[ "$CONFIG_DIR" != /* ]]; then CONFIG_DIR="$PWD/$CONFIG_DIR"; fi
+umask 077
+mkdir -p "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
+TTY_ARGS=(-i)
+if [[ -t 0 && -t 1 ]]; then TTY_ARGS=(-it); fi
+ENV_ARGS=()
+for suffix in NETWORK RPC_URL; do
+  name="${PREFIX}_${suffix}"
+  if [[ -v $name ]]; then ENV_ARGS+=(--env "$name"); fi
+done
+# Local builds have no remote registry. Remote tags are always refreshed.
+if [[ "$IMAGE" != "ethereum-wallet-cli:local" ]]; then docker pull "$IMAGE" >&2; fi
+exec docker run --rm "${TTY_ARGS[@]}" \
+  --user "$(id -u):$(id -g)" \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+  "${ENTRYPOINT_ARGS[@]}" \
+  "${ENV_ARGS[@]}" \
+  --mount "type=bind,source=$CONFIG_DIR,target=/data" \
+  "$IMAGE" "$@"
