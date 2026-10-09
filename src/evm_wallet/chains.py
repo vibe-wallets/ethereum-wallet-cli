@@ -23,12 +23,15 @@ BUILTIN_CHAINS: dict[str, Chain] = {
     "sepolia": Chain("sepolia", 11155111, "https://ethereum-sepolia-rpc.publicnode.com"),
     "monad": Chain("monad", 143, "https://rpc.monad.xyz"),
     "monad-testnet": Chain("monad-testnet", 10143, "https://testnet-rpc.monad.xyz"),
+    "bsc": Chain("bsc", 56, "https://bsc-rpc.publicnode.com"),
+    "bsc-testnet": Chain("bsc-testnet", 97, "https://bsc-testnet-rpc.publicnode.com"),
     "local": Chain("local", 31337, "http://127.0.0.1:8545"),
 }
 
 PROFILE_NETWORKS: dict[str, dict[str, str]] = {
     "ethereum": {"mainnet": "ethereum", "testnet": "sepolia", "local": "local"},
     "monad": {"mainnet": "monad", "testnet": "monad-testnet", "local": "local"},
+    "bsc": {"mainnet": "bsc", "testnet": "bsc-testnet", "local": "local"},
 }
 
 

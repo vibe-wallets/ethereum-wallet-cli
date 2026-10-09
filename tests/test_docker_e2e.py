@@ -236,7 +236,7 @@ class DockerAnvilSandbox:
 class LauncherShell:
     """PTY driver that exercises the exact interactive launcher and hides secrets."""
 
-    PROMPT = re.compile(rb"(?:ethereum|monad)\[[^\]]*\]\([^)]*\)> $")
+    PROMPT = re.compile(rb"(?:ethereum|monad|bsc)\[[^\]]*\]\([^)]*\)> $")
 
     def __init__(self, argv: list[str], environment: dict[str, str]):
         self.pid, self.terminal = pty.fork()
@@ -361,17 +361,20 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
     def test_real_launchers_run_encrypted_wallet_and_transaction_workflows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="wallet-cli-docker-e2e-") as temporary:
             root = Path(temporary)
-            config_dirs = {profile: root / f"{profile}-config" for profile in ("ethereum", "monad")}
+            profiles = ("ethereum", "monad", "bsc")
+            config_dirs = {profile: root / f"{profile}-config" for profile in profiles}
             with DockerAnvilSandbox(self.image) as sandbox:
                 sandbox.start_anvil("anvil-ethereum", 1)
                 sandbox.start_anvil("anvil-monad", 143)
+                sandbox.start_anvil("anvil-bsc", 56)
                 private_key = _new_test_private_key()
                 imported_address: str | None = None
-                generated_ethereum: str | None = None
+                generated_addresses: dict[str, str] = {}
 
                 for profile, chain_id, network_alias in (
                     ("ethereum", 1, "anvil-ethereum"),
                     ("monad", 143, "anvil-monad"),
+                    ("bsc", 56, "anvil-bsc"),
                 ):
                     with self.subTest(profile=profile):
                         current_address = self._exercise_profile(
@@ -392,16 +395,16 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
                             (config_dirs[profile] / "config.json").read_text(encoding="utf-8")
                         )
                         self.assertEqual(set(wallet_state["wallets"]), {"generated", "imported"})
-                        if profile == "ethereum":
-                            generated_ethereum = wallet_state["wallets"]["generated"]["address"]
+                        generated_addresses[profile] = wallet_state["wallets"]["generated"][
+                            "address"
+                        ]
+                        if imported_address is None:
                             imported_address = current_address
                         else:
-                            self.assertIsNotNone(generated_ethereum)
-                            self.assertNotEqual(
-                                generated_ethereum,
-                                wallet_state["wallets"]["generated"]["address"],
-                            )
                             self.assertEqual(imported_address, current_address)
+
+                # Every profile generated its own distinct key from the same seed.
+                self.assertEqual(len(set(generated_addresses)), len(profiles))
 
                 # Each command uses the other chain's isolated node to prove that
                 # the launcher's configured mainnet ID is checked before RPC reads.
@@ -430,23 +433,28 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
     ) -> dict[str, str]:
         environment = os.environ.copy()
         for name in tuple(environment):
-            if name.startswith(("ETHEREUM_WALLET_", "MONAD_WALLET_")):
+            if name.startswith(("ETHEREUM_WALLET_", "MONAD_WALLET_", "BSC_WALLET_")):
                 environment.pop(name)
         environment.update(
             ETHEREUM_WALLET_CONFIG_DIR=str(config_dirs["ethereum"]),
             MONAD_WALLET_CONFIG_DIR=str(config_dirs["monad"]),
+            BSC_WALLET_CONFIG_DIR=str(config_dirs["bsc"]),
             ETHEREUM_WALLET_IMAGE=self.image,
             MONAD_WALLET_IMAGE=self.image,
+            BSC_WALLET_IMAGE=self.image,
             ETHEREUM_WALLET_NETWORK="mainnet",
             MONAD_WALLET_NETWORK="mainnet",
+            BSC_WALLET_NETWORK="mainnet",
             ETHEREUM_WALLET_RPC_URL=f"http://{rpc_alias}:8545",
             MONAD_WALLET_RPC_URL=f"http://{rpc_alias}:8545",
+            BSC_WALLET_RPC_URL=f"http://{rpc_alias}:8545",
             ETHEREUM_WALLET_DOCKER_NETWORK=docker_network,
             MONAD_WALLET_DOCKER_NETWORK=docker_network,
+            BSC_WALLET_DOCKER_NETWORK=docker_network,
         )
         # The other profile's variables are intentionally present so the launcher's
         # allowlist and configuration isolation are exercised on every invocation.
-        self.assertIn(profile, {"ethereum", "monad"})
+        self.assertIn(profile, {"ethereum", "monad", "bsc"})
         return environment
 
     def _exercise_profile(
@@ -546,15 +554,17 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
 
             chain_list = shell.command("chain list")
             self.assertIn(f"mainnet: chain {chain_id}", chain_list)
-            self.assertIn(
-                "testnet: chain 11155111" if profile == "ethereum" else "testnet: chain 10143",
-                chain_list,
-            )
+            testnet_ids = {
+                "ethereum": "testnet: chain 11155111",
+                "monad": "testnet: chain 10143",
+                "bsc": "testnet: chain 97",
+            }
+            self.assertIn(testnet_ids[profile], chain_list)
             chain_info = shell.command("chain info")
             self.assertIn("mainnet", chain_info)
             self.assertIn(str(chain_id), chain_info)
             self.assertIn("No external command ran", chain_info)
-            other_profile = "monad" if profile == "ethereum" else "ethereum"
+            other_profile = next(name for name in ("ethereum", "monad", "bsc") if name != profile)
             rejected_chain = shell.command(f"chain info {other_profile}")
             self.assertIn("not available", rejected_chain)
             self.assertIn("No external command ran", rejected_chain)

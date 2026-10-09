@@ -90,6 +90,19 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(loaded["contacts"], {})
         self.assertEqual(loaded["tokens"], {})
 
+    def test_missing_builtin_chains_are_backfilled_without_a_version_bump(self) -> None:
+        self.store.ensure_directory()
+        legacy = new_config()
+        del legacy["chains"]["bsc"]
+        del legacy["chains"]["bsc-testnet"]
+        self.store.config_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+        loaded = self.store.load()
+        self.assertEqual(loaded["version"], 2)
+        self.assertEqual(loaded["chains"]["bsc"]["chain_id"], 56)
+        self.assertEqual(loaded["chains"]["bsc-testnet"]["chain_id"], 97)
+        self.assertEqual(loaded["chains"]["bsc"]["rpc_url"], "https://bsc-rpc.publicnode.com")
+
     def test_malformed_and_unknown_schema_files_fail_closed(self) -> None:
         self.store.ensure_directory()
         self.store.config_path.write_text("{not json", encoding="utf-8")

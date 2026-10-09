@@ -8,27 +8,29 @@ The launchers pull the public image `ghcr.io/vibe-wallets/ethereum-wallet-cli:ma
 
 ```bash
 scripts/ethereum-wallet-cli
-# Or open the separate Monad profile:
+# Or open the separate Monad or BNB Smart Chain profile:
 scripts/monad-wallet-cli
+scripts/bsc-wallet-cli
 ```
 
-The image contains both CLI entrypoints. Ethereum and Monad use their own entrypoint, environment prefix, and wallet directory while sharing the same image. Public pulls require no registry login after a published tag is available. If the public tag is not available yet, use a local build explicitly:
+The image contains every CLI entrypoint. Ethereum, Monad, and BNB Smart Chain use their own entrypoint, environment prefix, and wallet directory while sharing the same image. Public pulls require no registry login after a published tag is available. If the public tag is not available yet, use a local build explicitly:
 
 ```bash
 make build
 ETHEREUM_WALLET_IMAGE=ethereum-wallet-cli:local scripts/ethereum-wallet-cli
 MONAD_WALLET_IMAGE=ethereum-wallet-cli:local scripts/monad-wallet-cli
+BSC_WALLET_IMAGE=ethereum-wallet-cli:local scripts/bsc-wallet-cli
 ```
 
-Set `ETHEREUM_WALLET_IMAGE` or `MONAD_WALLET_IMAGE` to choose a different image for that profile. Remote images are pulled before every run; if that pull fails, the launcher stops instead of using a cached image.
+Set `ETHEREUM_WALLET_IMAGE`, `MONAD_WALLET_IMAGE`, or `BSC_WALLET_IMAGE` to choose a different image for that profile. Remote images are pulled before every run; if that pull fails, the launcher stops instead of using a cached image.
 
-`scripts/ethereum-wallet-cli` opens on Ethereum mainnet; `scripts/monad-wallet-cli` opens on Monad mainnet. They maintain separate wallets, aliases, network settings, and configuration. The default state directories are `~/.config/ethereum-wallet-cli` and `~/.config/monad-wallet-cli` (under `$XDG_CONFIG_HOME` when set). Override them with `ETHEREUM_WALLET_CONFIG_DIR` and `MONAD_WALLET_CONFIG_DIR`, respectively. Both wrappers create the host directory with mode `0700`, run the container with your host UID and GID, mount only that profile's state at `/data`, and use a read-only container filesystem apart from a temporary `/tmp`.
+`scripts/ethereum-wallet-cli` opens on Ethereum mainnet, `scripts/monad-wallet-cli` opens on Monad mainnet, and `scripts/bsc-wallet-cli` opens on BNB Smart Chain mainnet. They maintain separate wallets, aliases, network settings, and configuration. The default state directories are `~/.config/ethereum-wallet-cli`, `~/.config/monad-wallet-cli`, and `~/.config/bsc-wallet-cli` (under `$XDG_CONFIG_HOME` when set). Override them with `ETHEREUM_WALLET_CONFIG_DIR`, `MONAD_WALLET_CONFIG_DIR`, and `BSC_WALLET_CONFIG_DIR`, respectively. Every wrapper creates the host directory with mode `0700`, runs the container with your host UID and GID, mounts only that profile's state at `/data`, and uses a read-only container filesystem apart from a temporary `/tmp`.
 
-The network choices are fixed for each launcher: Ethereum `mainnet` (chain ID `1`), `testnet`/Sepolia (`11155111`), or local Anvil (`31337`); Monad `mainnet` (`143`), `testnet`/Monad Testnet (`10143`), or local Anvil (`31337`). Use `chain list` or `chain info` to inspect the endpoints for the current profile. Public endpoints can be rate-limited or change; confirm the selected network before sending.
+The network choices are fixed for each launcher: Ethereum `mainnet` (chain ID `1`), `testnet`/Sepolia (`11155111`), or local Anvil (`31337`); Monad `mainnet` (`143`), `testnet`/Monad Testnet (`10143`), or local Anvil (`31337`); BNB Smart Chain `mainnet` (`56`), `testnet`/BSC Testnet (`97`), or local Anvil (`31337`). Use `chain list` or `chain info` to inspect the endpoints for the current profile. Public endpoints can be rate-limited or change; confirm the selected network before sending.
 
-For Anvil running in another Docker container, attach the wallet container to the same user-created Docker network with `ETHEREUM_WALLET_DOCKER_NETWORK` or `MONAD_WALLET_DOCKER_NETWORK`. Then use the Anvil container's network name as the RPC host, for example `--network local --rpc-url http://anvil:8545`. These Docker network variables only set Docker's `--network` option; they are not passed into the wallet. With no variable set, Docker's default network is used. The local endpoint `127.0.0.1:8545` works only when Anvil shares the wallet container's network namespace.
+For Anvil running in another Docker container, attach the wallet container to the same user-created Docker network with `ETHEREUM_WALLET_DOCKER_NETWORK`, `MONAD_WALLET_DOCKER_NETWORK`, or `BSC_WALLET_DOCKER_NETWORK`. Then use the Anvil container's network name as the RPC host, for example `--network local --rpc-url http://anvil:8545`. These Docker network variables only set Docker's `--network` option; they are not passed into the wallet. With no variable set, Docker's default network is used. The local endpoint `127.0.0.1:8545` works only when Anvil shares the wallet container's network namespace.
 
-To use a testnet, start with `scripts/ethereum-wallet-cli --network testnet` or `scripts/monad-wallet-cli --network testnet`. `--network local` selects the built-in Anvil endpoint. `--rpc-url URL` overrides the RPC endpoint for that invocation, while the CLI keeps the selected network's fixed chain ID and checks it before RPC operations. Network choices apply to the current run or shell; a new launch starts on that entrypoint's mainnet unless its network environment variable is set.
+To use a testnet, start with `scripts/ethereum-wallet-cli --network testnet`, `scripts/monad-wallet-cli --network testnet`, or `scripts/bsc-wallet-cli --network testnet`. `--network local` selects the built-in Anvil endpoint. `--rpc-url URL` overrides the RPC endpoint for that invocation, while the CLI keeps the selected network's fixed chain ID and checks it before RPC operations. Network choices apply to the current run or shell; a new launch starts on that entrypoint's mainnet unless its network environment variable is set.
 
 ## 2. Create a wallet
 
@@ -48,19 +50,20 @@ address
 
 Foundry generates the private key and writes an encrypted keystore. The CLI does not export the generated raw key, so back up the full state directory and preserve its password separately. The keystore without its password cannot be used to sign.
 
-The first wallet in a profile becomes its saved default automatically. `wallet use ALIAS` selects a wallet for the current shell; use `wallet default ALIAS` to save the wallet selected at later launches. The Monad launcher has its own wallet store. Run `scripts/monad-wallet-cli`, then create or import a wallet there; a wallet created independently in each profile will have a different address. To use the same key, import it separately into both profiles. Monad uses mainnet by default, so querying its balance does not require chain setup.
+The first wallet in a profile becomes its saved default automatically. `wallet use ALIAS` selects a wallet for the current shell; use `wallet default ALIAS` to save the wallet selected at later launches. The Monad and BNB Smart Chain launchers each have their own wallet store. Run `scripts/monad-wallet-cli` or `scripts/bsc-wallet-cli`, then create or import a wallet there; a wallet created independently in each profile will have a different address. To use the same key, import it separately into each profile. Monad and BNB Smart Chain use mainnet by default, so querying their balance does not require chain setup.
 
-After setting up a wallet in the Monad profile, its mainnet balance needs no network configuration step:
+After setting up a wallet in another profile, its mainnet balance needs no network configuration step:
 
 ```bash
 scripts/monad-wallet-cli -c 'balance' --json
+scripts/bsc-wallet-cli -c 'balance' --json
 ```
 
 To import an existing private key instead, run `wallet import savings` and follow Foundry's hidden prompts. Do not paste private keys into shell commands, scripts, environment variables, tickets, or chat. This command imports a private key; it does not import a seed phrase or recover an HD wallet.
 
 ## Back up and restore wallet state
 
-Exit the CLI, then copy the entire host state directory to secure backup storage. The copy must include both `config.json` and the `wallets/` directory so wallet aliases still point to their encrypted keystore files. Ethereum and Monad use separate stores: the defaults are `~/.config/ethereum-wallet-cli` and `~/.config/monad-wallet-cli`. If you set `ETHEREUM_WALLET_CONFIG_DIR` or `MONAD_WALLET_CONFIG_DIR`, back up that profile's selected directory instead. Keep each Foundry keystore password in a separate secure place. Do not put passwords alongside the encrypted backups.
+Exit the CLI, then copy the entire host state directory to secure backup storage. The copy must include both `config.json` and the `wallets/` directory so wallet aliases still point to their encrypted keystore files. Ethereum, Monad, and BNB Smart Chain use separate stores: the defaults are `~/.config/ethereum-wallet-cli`, `~/.config/monad-wallet-cli`, and `~/.config/bsc-wallet-cli`. If you set `ETHEREUM_WALLET_CONFIG_DIR`, `MONAD_WALLET_CONFIG_DIR`, or `BSC_WALLET_CONFIG_DIR`, back up that profile's selected directory instead. Keep each Foundry keystore password in a separate secure place. Do not put passwords alongside the encrypted backups.
 
 To restore, copy the full directory back to a private host path and point the launcher at it:
 
@@ -68,9 +71,10 @@ To restore, copy the full directory back to a private host path and point the la
 ETHEREUM_WALLET_CONFIG_DIR=/secure/restore/ethereum-wallet scripts/ethereum-wallet-cli -c 'wallet list'
 ETHEREUM_WALLET_CONFIG_DIR=/secure/restore/ethereum-wallet scripts/ethereum-wallet-cli -c 'wallet info daily'
 MONAD_WALLET_CONFIG_DIR=/secure/restore/monad-wallet scripts/monad-wallet-cli -c 'wallet list'
+BSC_WALLET_CONFIG_DIR=/secure/restore/bsc-wallet scripts/bsc-wallet-cli -c 'wallet list'
 ```
 
-This confirms the alias, encrypted file, and public address are readable. The CLI has no non-broadcast command to test a keystore password; signing prompts for it when sending. For imported keys, also preserve your original key backup independently. For keys created with `wallet new`, the encrypted keystore and its separate password are the available backup. Restore each profile into its matching config directory; one launcher's wallet list never includes the other launcher's wallets.
+This confirms the alias, encrypted file, and public address are readable. The CLI has no non-broadcast command to test a keystore password; signing prompts for it when sending. For imported keys, also preserve your original key backup independently. For keys created with `wallet new`, the encrypted keystore and its separate password are the available backup. Restore each profile into its matching config directory; one launcher's wallet list never includes another launcher's wallets.
 
 ## 3. Check the network and balance
 
@@ -94,7 +98,7 @@ send 0xRecipientAddress 0.001 --dry-run
 send 0xRecipientAddress 0.001
 ```
 
-The amount is in the selected chain's native currency (ETH on Ethereum, MON on Monad). Check the selected chain, destination, amount, and estimated gas units before approving a real transfer. Gas units are not the total fee; the fee also depends on gas pricing and execution.
+The amount is in the selected chain's native currency (ETH on Ethereum, MON on Monad, BNB on BNB Smart Chain). Check the selected chain, destination, amount, and estimated gas units before approving a real transfer. Gas units are not the total fee; the fee also depends on gas pricing and execution.
 
 `--yes` skips the CLI confirmation only. Foundry still asks for the selected keystore's password through a hidden prompt, and signing requires an interactive terminal.
 
@@ -118,6 +122,7 @@ scripts/ethereum-wallet-cli -c 'address'
 scripts/ethereum-wallet-cli -c 'balance' --json
 scripts/ethereum-wallet-cli -c 'wallet list' --json
 scripts/monad-wallet-cli -c 'balance' --json
+scripts/bsc-wallet-cli -c 'balance' --json
 ```
 
-The Ethereum wrapper forwards `ETHEREUM_WALLET_NETWORK` and `ETHEREUM_WALLET_RPC_URL`; the Monad wrapper forwards `MONAD_WALLET_NETWORK` and `MONAD_WALLET_RPC_URL`. CLI options `--network` and `--rpc-url` override the environment and mainnet default. Neither wrapper reads an `.env` file from your current directory. See [supported networks and endpoints](chains-and-wallets.md#supported-networks-and-endpoints) for the fixed mappings.
+The Ethereum wrapper forwards `ETHEREUM_WALLET_NETWORK` and `ETHEREUM_WALLET_RPC_URL`; the Monad wrapper forwards `MONAD_WALLET_NETWORK` and `MONAD_WALLET_RPC_URL`; the BNB Smart Chain wrapper forwards `BSC_WALLET_NETWORK` and `BSC_WALLET_RPC_URL`. CLI options `--network` and `--rpc-url` override the environment and mainnet default. No wrapper reads an `.env` file from your current directory. See [supported networks and endpoints](chains-and-wallets.md#supported-networks-and-endpoints) for the fixed mappings.

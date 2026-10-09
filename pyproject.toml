@@ -5,13 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ethereum-wallet-cli"
 version = "0.1.0"
-description = "A small Foundry-backed wallet CLI for Ethereum and Monad"
+description = "A small Foundry-backed wallet CLI for Ethereum, Monad, and BNB Smart Chain"
 requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
 ethereum-wallet-cli = "evm_wallet.cli:main"
 monad-wallet-cli = "evm_wallet.cli:monad_main"
+bsc-wallet-cli = "evm_wallet.cli:bsc_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

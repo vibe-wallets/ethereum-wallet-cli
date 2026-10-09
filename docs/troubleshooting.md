@@ -6,13 +6,13 @@ Install and start Docker, then verify `docker info` succeeds. Building and launc
 
 ## The launcher says it cannot pull an image
 
-Both launchers default to `ghcr.io/vibe-wallets/ethereum-wallet-cli:main` and pull it before each run. A pull error means the command did not start. Check network access and the image reference; public pulls should not need login once the tag is published. If the public tag is not available yet, build and explicitly select the local image: `make build`, then `ETHEREUM_WALLET_IMAGE=ethereum-wallet-cli:local scripts/ethereum-wallet-cli` or `MONAD_WALLET_IMAGE=ethereum-wallet-cli:local scripts/monad-wallet-cli`. A remote `ETHEREUM_WALLET_IMAGE` or `MONAD_WALLET_IMAGE` override is also pulled on each run. The wrapper stops after any pull failure instead of silently using a cached image.
+All launchers default to `ghcr.io/vibe-wallets/ethereum-wallet-cli:main` and pull it before each run. A pull error means the command did not start. Check network access and the image reference; public pulls should not need login once the tag is published. If the public tag is not available yet, build and explicitly select the local image: `make build`, then `ETHEREUM_WALLET_IMAGE=ethereum-wallet-cli:local scripts/ethereum-wallet-cli`, `MONAD_WALLET_IMAGE=ethereum-wallet-cli:local scripts/monad-wallet-cli`, or `BSC_WALLET_IMAGE=ethereum-wallet-cli:local scripts/bsc-wallet-cli`. A remote `ETHEREUM_WALLET_IMAGE`, `MONAD_WALLET_IMAGE`, or `BSC_WALLET_IMAGE` override is also pulled on each run. The wrapper stops after any pull failure instead of silently using a cached image.
 
 To test a published image reference directly, run `make test-published PUBLISHED_IMAGE=ghcr.io/vibe-wallets/ethereum-wallet-cli:<tag>`. This target pulls the image and runs the full Docker end-to-end suite without building locally.
 
 ## Permission denied for wallet files
 
-Each launcher creates its own host config directory with mode `0700`, then runs the container using your host UID/GID. Check that the parent path is writable and that another user or process has not changed ownership. The Ethereum profile uses `ETHEREUM_WALLET_CONFIG_DIR` or its XDG default; Monad uses `MONAD_WALLET_CONFIG_DIR` or its separate XDG default.
+Each launcher creates its own host config directory with mode `0700`, then runs the container using your host UID/GID. Check that the parent path is writable and that another user or process has not changed ownership. The Ethereum profile uses `ETHEREUM_WALLET_CONFIG_DIR` or its XDG default; Monad uses `MONAD_WALLET_CONFIG_DIR` and BNB Smart Chain uses `BSC_WALLET_CONFIG_DIR`, each with its own XDG default.
 
 ## No RPC response, wrong chain, or rate limit
 
@@ -32,4 +32,4 @@ Check that the correct alias is selected and use the password associated with th
 
 ## JSON output or command syntax differs
 
-Run either wrapper with `--help` for top-level options and `help` inside the shell. The same command parser is used by interactive commands and `-c 'COMMAND'`; use `--json` for machine-readable output. For automation, parse the successful result from standard output and keep standard error separate because it contains the Cast command trace and, on errors, the error record. Custom/local RPC URLs are masked in traces. Avoid depending on output fields not documented by the command or validated by your own parser.
+Run any wrapper with `--help` for top-level options and `help` inside the shell. The same command parser is used by interactive commands and `-c 'COMMAND'`; use `--json` for machine-readable output. For automation, parse the successful result from standard output and keep standard error separate because it contains the Cast command trace and, on errors, the error record. Custom/local RPC URLs are masked in traces. Avoid depending on output fields not documented by the command or validated by your own parser.

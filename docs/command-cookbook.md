@@ -60,6 +60,9 @@ scripts/ethereum-wallet-cli --network local
 scripts/monad-wallet-cli --network mainnet
 scripts/monad-wallet-cli --network testnet    # Monad Testnet
 scripts/monad-wallet-cli --network local
+scripts/bsc-wallet-cli --network mainnet
+scripts/bsc-wallet-cli --network testnet       # BSC Testnet
+scripts/bsc-wallet-cli --network local
 ```
 
 `chain list` and `chain info [mainnet|testnet|local]` only inspect the networks available in that launcher profile. The selected network does not persist to the next invocation. `--rpc-url URL` overrides the selected network's endpoint for the current process; the fixed chain ID remains in force and is checked before RPC operations. Network choices are fixed for each profile.
@@ -229,12 +232,15 @@ The `--network` values map to these fixed chains:
 | Monad | `mainnet` | Monad | 143 |
 | Monad | `testnet` | Monad Testnet | 10143 |
 | Monad | `local` | Anvil | 31337 |
+| BNB Smart Chain | `mainnet` | BNB Smart Chain | 56 |
+| BNB Smart Chain | `testnet` | BSC Testnet | 97 |
+| BNB Smart Chain | `local` | Anvil | 31337 |
 
 Built-in RPC defaults are shown in [chain and wallet concepts](chains-and-wallets.md). Use `--rpc-url` when you have another endpoint for the same chain. The CLI checks the endpoint's chain ID, but that does not prove that its operator is trustworthy.
 
 ## JSON automation
 
-Request structured output for one-shot commands. Choose the Ethereum or Monad launcher according to the separate wallet profile you want to query:
+Request structured output for one-shot commands. Choose the Ethereum, Monad, or BNB Smart Chain launcher according to the separate wallet profile you want to query:
 
 ```bash
 scripts/ethereum-wallet-cli -c 'chain list' --json
@@ -242,9 +248,10 @@ scripts/ethereum-wallet-cli -c 'wallet list' --json
 scripts/ethereum-wallet-cli -c 'balance' --json
 scripts/ethereum-wallet-cli -c 'tx inspect 0xTransactionHash' --json
 scripts/monad-wallet-cli -c 'balance' --json
+scripts/bsc-wallet-cli -c 'balance' --json
 ```
 
-Treat output as data from the configured RPC. Do not put secrets in command strings or scripts. The signing password remains an interactive prompt even when the command is launched with `-c`. The two launchers use independent config directories, so a wallet imported into the Ethereum profile is not automatically present in the Monad profile.
+Treat output as data from the configured RPC. Do not put secrets in command strings or scripts. The signing password remains an interactive prompt even when the command is launched with `-c`. The launchers use independent config directories, so a wallet imported into the Ethereum profile is not automatically present in the Monad or BNB Smart Chain profile.
 
 Successful JSON output has an `ok: true` field, a `command` name, and command-specific fields. For example, a native balance response looks like:
 

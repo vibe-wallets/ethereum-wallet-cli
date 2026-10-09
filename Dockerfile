@@ -4,7 +4,7 @@ FROM ghcr.io/foundry-rs/foundry:v1.8.5@sha256:32c8ea9ef052a440cb1620175987a3f49e
 FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
 
 LABEL org.opencontainers.image.source="https://github.com/vibe-wallets/ethereum-wallet-cli"
-LABEL org.opencontainers.image.description="Foundry-backed Ethereum and Monad wallet CLIs"
+LABEL org.opencontainers.image.description="Foundry-backed Ethereum, Monad, and BNB Smart Chain wallet CLIs"
 
 WORKDIR /app
 
@@ -22,13 +22,14 @@ RUN groupadd --gid 10001 wallet \
 COPY src /app/src
 COPY scripts/container/ /usr/local/bin/
 
-# Both entry points share one image and receive their own /data mount.
+# Every entry point shares one image and receives its own /data mount.
 ENV PYTHONPATH=/app/src \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOME=/tmp \
     ETHEREUM_WALLET_CONFIG_DIR=/data \
-    MONAD_WALLET_CONFIG_DIR=/data
+    MONAD_WALLET_CONFIG_DIR=/data \
+    BSC_WALLET_CONFIG_DIR=/data
 
 USER 10001:10001
 ENTRYPOINT ["ethereum-wallet-cli"]

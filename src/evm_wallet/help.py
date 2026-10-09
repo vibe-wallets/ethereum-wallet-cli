@@ -97,8 +97,8 @@ wallet delete ALIAS [--yes]
   Delete the local encrypted keystore. On-chain funds are never touched. The
   command asks for confirmation unless --yes is given.
 
-The Ethereum and Monad launchers keep separate stores, so an alias exists in one
-profile only unless you import the same key into both.
+The Ethereum, Monad, and BNB Smart Chain launchers keep separate stores, so an alias
+exists in one profile only unless you import the same key into both.
 """,
     "chain": """NETWORK COMMANDS
 
@@ -170,7 +170,9 @@ nonce [ADDRESS]
 
 gas
   Show the current gas price and base fee reported by the selected network's RPC
-  endpoint, in wei and gwei. They are estimates, not a fee guarantee.
+  endpoint, in wei and gwei. They are estimates, not a fee guarantee. On BNB Smart
+  Chain the base fee is pinned to 0 by BEP-226, so the gas price (priority fee) is
+  the real cost.
 """,
     "history": """HISTORY
 

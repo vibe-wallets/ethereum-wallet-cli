@@ -536,7 +536,11 @@ def _shell_prompt(app: Application, chain_name: str, wallet_alias: str) -> str:
 
 def _print_banner(app: Application, state: dict[str, object]) -> None:
     """Show the selected wallet and network once when the shell starts."""
-    titles = {"ethereum": "Ethereum Wallet CLI", "monad": "Monad Wallet CLI"}
+    titles = {
+        "ethereum": "Ethereum Wallet CLI",
+        "monad": "Monad Wallet CLI",
+        "bsc": "BNB Smart Chain Wallet CLI",
+    }
     print(section_title(titles.get(app.profile, "Wallet CLI"), stream=sys.stdout))
     alias = app.active_wallet_alias(state)
     if alias and alias in state["wallets"]:
@@ -726,6 +730,18 @@ def monad_main(argv: Sequence[str] | None = None) -> int:
         network_env="MONAD_WALLET_NETWORK",
         rpc_env="MONAD_WALLET_RPC_URL",
         config_subdir="monad-wallet-cli",
+    )
+
+
+def bsc_main(argv: Sequence[str] | None = None) -> int:
+    return main(
+        argv,
+        profile="bsc",
+        prog="bsc-wallet-cli",
+        config_env="BSC_WALLET_CONFIG_DIR",
+        network_env="BSC_WALLET_NETWORK",
+        rpc_env="BSC_WALLET_RPC_URL",
+        config_subdir="bsc-wallet-cli",
     )
 
 

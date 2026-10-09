@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "scripts" / "ethereum-wallet-cli"
 MONAD_LAUNCHER = ROOT / "scripts" / "monad-wallet-cli"
+BSC_LAUNCHER = ROOT / "scripts" / "bsc-wallet-cli"
 
 
 class LauncherTests(unittest.TestCase):
@@ -179,6 +180,51 @@ class LauncherTests(unittest.TestCase):
         call = self.calls()[1]
         self.assertIn("--entrypoint", call)
         self.assertIn("monad-wallet-cli", call)
+        self.assertIn(f"type=bind,source={config},target=/data", call)
+
+    def test_bsc_launcher_uses_bsc_entrypoint_config_and_environment_allowlist(self) -> None:
+        config = self.root / "bsc config"
+        result = self.run_launcher(
+            "-c",
+            "chain list",
+            launcher=BSC_LAUNCHER,
+            BSC_WALLET_CONFIG_DIR=str(config),
+            BSC_WALLET_IMAGE="ethereum-wallet-cli:local",
+            BSC_WALLET_NETWORK="testnet",
+            BSC_WALLET_RPC_URL="https://bsc-private.example.invalid/rpc",
+            MONAD_WALLET_CONFIG_DIR=str(self.root / "wrong-monad-config"),
+            MONAD_WALLET_NETWORK="testnet",
+            MONAD_WALLET_RPC_URL="https://monad-private.example.invalid/rpc",
+            PRIVATE_KEY="must-not-be-forwarded",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(config.stat().st_mode & 0o777, 0o700)
+        calls = self.calls()
+        self.assertEqual(len(calls), 1)
+        call = calls[0]
+        self.assertIn("--entrypoint", call)
+        self.assertIn("bsc-wallet-cli", call)
+        self.assertIn("BSC_WALLET_NETWORK", call)
+        self.assertIn("BSC_WALLET_RPC_URL", call)
+        self.assertNotIn("MONAD_WALLET_NETWORK", call)
+        self.assertNotIn("MONAD_WALLET_RPC_URL", call)
+        self.assertNotIn("PRIVATE_KEY", call)
+        self.assertIn(f"type=bind,source={config},target=/data", call)
+        self.assertEqual(call[-3:], ["ethereum-wallet-cli:local", "-c", "chain list"])
+
+    def test_bsc_launcher_default_directory_is_separate_under_xdg(self) -> None:
+        xdg = self.root / "xdg bsc"
+        result = self.run_launcher("--version", launcher=BSC_LAUNCHER, XDG_CONFIG_HOME=str(xdg))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = xdg / "bsc-wallet-cli"
+        self.assertTrue(config.is_dir())
+        self.assertEqual(config.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.calls()[0], ["pull", "ghcr.io/vibe-wallets/ethereum-wallet-cli:main"])
+        call = self.calls()[1]
+        self.assertIn("--entrypoint", call)
+        self.assertIn("bsc-wallet-cli", call)
         self.assertIn(f"type=bind,source={config},target=/data", call)
 
     def test_named_docker_network_is_profile_specific_and_not_forwarded_as_wallet_env(self):

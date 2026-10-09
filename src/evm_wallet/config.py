@@ -78,7 +78,13 @@ def validate_symbol(symbol: str | None) -> str | None:
 
 
 def _migrate_document(document: object) -> object:
-    """Upgrade a version 1 document to version 2 with empty contacts and tokens."""
+    """Upgrade old documents without changing the version 2 schema.
+
+    Version 1 documents gain empty contacts and tokens. Then any built-in chain added
+    by a newer build (for example BNB Smart Chain) is backfilled, so a config created
+    before that chain existed can still select it. The schema shape is unchanged, so
+    the version stays at 2.
+    """
     if (
         isinstance(document, dict)
         and type(document.get("version")) is int
@@ -88,7 +94,16 @@ def _migrate_document(document: object) -> object:
         migrated["version"] = 2
         migrated.setdefault("contacts", {})
         migrated.setdefault("tokens", {})
-        return migrated
+        document = migrated
+    if isinstance(document, dict) and isinstance(document.get("chains"), dict):
+        chains = document["chains"]
+        missing = {
+            name: {"chain_id": chain.chain_id, "rpc_url": chain.rpc_url}
+            for name, chain in BUILTIN_CHAINS.items()
+            if name not in chains
+        }
+        if missing:
+            document = {**document, "chains": {**chains, **missing}}
     return document
 
 

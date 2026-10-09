@@ -147,6 +147,8 @@ class CastClient:
             "https://ethereum-sepolia-rpc.publicnode.com",
             "https://rpc.monad.xyz",
             "https://testnet-rpc.monad.xyz",
+            "https://bsc-rpc.publicnode.com",
+            "https://bsc-testnet-rpc.publicnode.com",
         }
         shown = list(command)
         for index, value in enumerate(shown[:-1]):

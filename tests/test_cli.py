@@ -14,7 +14,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from evm_wallet.cli import main, monad_main
+from evm_wallet.cli import bsc_main, main, monad_main
 from evm_wallet.config import ConfigStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -262,8 +262,43 @@ class CliTests(unittest.TestCase):
         self.assertIn(monad_address, monad_output.getvalue())
         self.assertNotIn(evm_address, monad_output.getvalue())
 
+    def test_bsc_entrypoint_is_isolated_and_reads_only_its_own_environment(self) -> None:
+        xdg = Path(self.temporary.name) / "bsc-xdg"
+        environment = {
+            "XDG_CONFIG_HOME": str(xdg),
+            "BSC_WALLET_NETWORK": "testnet",
+            "BSC_WALLET_RPC_URL": "https://bsc-env.example.invalid/rpc",
+            "MONAD_WALLET_NETWORK": "testnet",
+            "MONAD_WALLET_RPC_URL": "https://monad-env.example.invalid/rpc",
+            "ETHEREUM_WALLET_NETWORK": "testnet",
+            "ETHEREUM_WALLET_RPC_URL": "https://ethereum-env.example.invalid/rpc",
+        }
+        bsc_output = io.StringIO()
+        bsc_list = io.StringIO()
+        with patch.dict(os.environ, environment, clear=True):
+            with redirect_stdout(bsc_output), redirect_stderr(io.StringIO()):
+                self.assertEqual(bsc_main(["-c", "chain info"]), 0)
+            with redirect_stdout(bsc_list), redirect_stderr(io.StringIO()):
+                self.assertEqual(bsc_main(["-c", "chain list", "--json"]), 0)
+
+        text = bsc_output.getvalue()
+        self.assertIn("Network : testnet", text)
+        self.assertIn("Chain ID: 97", text)
+        self.assertIn("https://bsc-env.example.invalid/rpc", text)
+        self.assertNotIn("monad-env", text)
+        self.assertNotIn("ethereum-env", text)
+        self.assertEqual(
+            {chain["chain_id"] for chain in json.loads(bsc_list.getvalue())["chains"]},
+            {56, 97, 31337},
+        )
+        self.assertTrue((xdg / "bsc-wallet-cli").is_dir())
+
     def test_network_selector_cannot_cross_the_entrypoint_profile(self) -> None:
-        for entrypoint, network in ((main, "monad"), (monad_main, "ethereum")):
+        for entrypoint, network in (
+            (main, "monad"),
+            (monad_main, "ethereum"),
+            (bsc_main, "monad"),
+        ):
             with self.subTest(network=network):
                 stderr = io.StringIO()
                 with (

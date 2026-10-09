@@ -65,6 +65,31 @@ Advanced command batch
 - Validation: 108 offline tests, plus the Docker end-to-end suite extended with the
   new commands and verbose-help gating.
 
+BNB Smart Chain profile
+
+- Added `bsc-wallet-cli` as a third profile with the `BSC_WALLET_*` environment
+  prefix and a `~/.config/bsc-wallet-cli` store: chains `bsc` (chain 56,
+  `https://bsc-rpc.publicnode.com`) and `bsc-testnet` (chain 97,
+  `https://bsc-testnet-rpc.publicnode.com`), plus the shared `local` Anvil (31337).
+  The profile is named `bsc` everywhere to match the RPC/ecosystem convention.
+- Config backfill: `_migrate_document` now injects any missing built-in chain
+  entries on load while keeping schema version 2, so a config created before BSC
+  existed (for example a shared Docker `/data`) can already select the new chains.
+  The trace URL allowlist gained the two public BSC endpoints explicitly.
+- BNB Smart Chain enables EIP-1559 with the base fee pinned to 0 (BEP-226), so the
+  existing `gas` output shows a 0 base fee and the real cost is the gas price; the
+  `gas` help topic now notes this.
+- Verified against live endpoints: chain IDs 56/97, `cast base-fee` = 0, `cast
+  estimate` (native 21000, BEP-20 34862), `cast call` on a BEP-20, and `cast mktx`
+  producing a correctly signed type-2 transaction for chain 56.
+- Validation: 113 offline tests, `make test-integration`, and `make test-docker`
+  (three launchers and a third Anvil at chain 56) all pass locally.
+- Provider extensibility: each chain currently pins one built-in RPC URL (PublicNode
+  for Ethereum and BSC). Adding alternate or official providers later stays additive:
+  extend the built-in chain definitions with extra URLs and evolve the config schema,
+  while the shared `--rpc-url` / `*_WALLET_RPC_URL` override already selects a custom
+  provider for a single run. No provider-selection command is implemented yet.
+
 Distribution decision and delivery fix
 - The GHCR package is distributed privately. The `publish` job publishes the immutable
   commit-SHA image; `published-e2e` and `default-image-e2e` grant `packages: read` to

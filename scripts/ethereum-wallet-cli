@@ -1,21 +1,29 @@
 #!/usr/bin/env bash
 #
-# Container launcher for the Ethereum and Monad wallet CLIs.
+# Container launcher for the Ethereum, Monad, and BNB Smart Chain wallet CLIs.
 #
-# This single script serves both entry points. scripts/monad-wallet-cli is a
-# symlink to this file, and the profile is selected from the invoked file name, so
-# each launcher keeps its own image variable, config directory, and entry point.
+# This single script serves every entry point. scripts/monad-wallet-cli and
+# scripts/bsc-wallet-cli are symlinks to this file, and the profile is selected from the
+# invoked file name, so each launcher keeps its own image variable, config directory,
+# and entry point.
 #
 set -euo pipefail
 
 PROFILE=ethereum
 PREFIX=ETHEREUM_WALLET
 ENTRYPOINT_ARGS=()
-if [[ "$(basename "$0")" == "monad-wallet-cli" ]]; then
-  PROFILE=monad
-  PREFIX=MONAD_WALLET
-  ENTRYPOINT_ARGS=(--entrypoint monad-wallet-cli)
-fi
+case "$(basename "$0")" in
+  monad-wallet-cli)
+    PROFILE=monad
+    PREFIX=MONAD_WALLET
+    ENTRYPOINT_ARGS=(--entrypoint monad-wallet-cli)
+    ;;
+  bsc-wallet-cli)
+    PROFILE=bsc
+    PREFIX=BSC_WALLET
+    ENTRYPOINT_ARGS=(--entrypoint bsc-wallet-cli)
+    ;;
+esac
 
 # Resolve the image and the host directory that stores this profile's keystore.
 IMAGE_VAR="${PREFIX}_IMAGE"

@@ -7,19 +7,20 @@ PYTHON ?= python3
 RUFF ?= ruff
 PUBLISHED_IMAGE ?= ghcr.io/vibe-wallets/ethereum-wallet-cli:main
 
-.PHONY: help build test test-integration test-docker test-published lint format format-check run run-monad clean
+.PHONY: help build test test-integration test-docker test-published lint format format-check run run-monad run-bsc clean
 
 help:
 	@echo 'build              Build Docker image (IMAGE=ethereum-wallet-cli:local)'
 	@echo 'test               Run offline tests'
 	@echo 'test-integration   Run isolated Foundry/Anvil tests in Docker'
-	@echo 'test-docker        Test both real launchers with disposable encrypted wallets'
+	@echo 'test-docker        Test every real launcher with disposable encrypted wallets'
 	@echo 'test-published     Pull and test the registry image (PUBLISHED_IMAGE=...)'
 	@echo 'lint               Compile Python and check shell syntax'
 	@echo 'format             Format Python source and tests (requires Ruff)'
 	@echo 'format-check       Check Python formatting'
 	@echo 'run                Launch Docker wallet shell (ARGS="...")'
 	@echo 'run-monad          Launch Monad wallet shell (ARGS="...")'
+	@echo 'run-bsc            Launch BNB Smart Chain wallet shell (ARGS="...")'
 	@echo 'clean              Remove generated Python cache files'
 
 # --- Build and run ----------------------------------------------------------
@@ -32,6 +33,9 @@ run:
 
 run-monad:
 	MONAD_WALLET_IMAGE=$(IMAGE) scripts/monad-wallet-cli $(ARGS)
+
+run-bsc:
+	BSC_WALLET_IMAGE=$(IMAGE) scripts/bsc-wallet-cli $(ARGS)
 
 # --- Tests ------------------------------------------------------------------
 
@@ -65,8 +69,8 @@ test-published:
 lint:
 	$(RUFF) check --config pyproject.toml src tests scripts/ci
 	$(PYTHON) -m compileall -q src tests scripts/ci
-	bash -n scripts/ethereum-wallet-cli scripts/monad-wallet-cli
-	sh -n scripts/container/ethereum-wallet-cli scripts/container/monad-wallet-cli
+	bash -n scripts/ethereum-wallet-cli scripts/monad-wallet-cli scripts/bsc-wallet-cli
+	sh -n scripts/container/ethereum-wallet-cli scripts/container/monad-wallet-cli scripts/container/bsc-wallet-cli
 
 format:
 	$(RUFF) check --config pyproject.toml --select I --fix src tests scripts/ci

@@ -1,6 +1,6 @@
 # Documentation
 
-The Docker image has two launchers: `scripts/ethereum-wallet-cli` selects the Ethereum profile, and `scripts/monad-wallet-cli` selects the Monad profile. They use separate wallet/config directories and aliases. Each launcher exposes only its fixed mainnet, testnet, and local Anvil network choices.
+The Docker image has three launchers: `scripts/ethereum-wallet-cli` selects the Ethereum profile, `scripts/monad-wallet-cli` selects the Monad profile, and `scripts/bsc-wallet-cli` selects the BNB Smart Chain profile. They use separate wallet/config directories and aliases. Each launcher exposes only its fixed mainnet, testnet, and local Anvil network choices.
 
 Use these guides in order if you are new to the CLI:
 

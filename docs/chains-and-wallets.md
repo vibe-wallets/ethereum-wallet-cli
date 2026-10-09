@@ -2,11 +2,11 @@
 
 ## An EVM address can exist on many chains
 
-Ethereum, Monad, and many other EVM networks use the same address format and signing model. An address derived from one private key can therefore be the same on multiple EVM chains. The account's balance, transaction history, token contracts, and nonce are still chain-specific. A token address on Ethereum may refer to a different contract or no contract on another chain.
+Ethereum, Monad, BNB Smart Chain, and many other EVM networks use the same address format and signing model. An address derived from one private key can therefore be the same on multiple EVM chains. The account's balance, transaction history, token contracts, and nonce are still chain-specific. A token address on Ethereum may refer to a different contract or no contract on another chain.
 
 Before a transfer, verify both the selected chain and the destination. Never infer the chain from the address alone.
 
-The Ethereum and Monad launchers keep separate wallet stores. Creating a new wallet in each creates different private keys. To use one account with both launchers, import the same private key separately into each store; each copy is encrypted with its own passphrase.
+The Ethereum, Monad, and BNB Smart Chain launchers keep separate wallet stores. Creating a new wallet in each creates different private keys. To use one account across launchers, import the same private key separately into each store; each copy is encrypted with its own passphrase.
 
 ## Chain ID and RPC endpoint
 
@@ -16,7 +16,7 @@ Public RPC services can impose rate limits, change availability, log requests, o
 
 ## Supported networks and endpoints
 
-Network selection is fixed by each launcher. `ethereum-wallet-cli` supports Ethereum mainnet, Sepolia, and local Anvil; `monad-wallet-cli` supports Monad mainnet, Monad Testnet, and local Anvil. Both commands use the `--network` values `mainnet`, `testnet`, and `local`:
+Network selection is fixed by each launcher. `ethereum-wallet-cli` supports Ethereum mainnet, Sepolia, and local Anvil; `monad-wallet-cli` supports Monad mainnet, Monad Testnet, and local Anvil; `bsc-wallet-cli` supports BNB Smart Chain mainnet, BSC Testnet, and local Anvil. All three commands use the `--network` values `mainnet`, `testnet`, and `local`:
 
 | Launcher | `--network` | Chain | Chain ID | Default RPC URL |
 | --- | --- | --- | ---: | --- |
@@ -26,6 +26,9 @@ Network selection is fixed by each launcher. `ethereum-wallet-cli` supports Ethe
 | Monad | `mainnet` | Monad | 143 | `https://rpc.monad.xyz` |
 | Monad | `testnet` | Monad Testnet | 10143 | `https://testnet-rpc.monad.xyz` |
 | Monad | `local` | Anvil | 31337 | `http://127.0.0.1:8545` |
+| BNB Smart Chain | `mainnet` | BNB Smart Chain | 56 | `https://bsc-rpc.publicnode.com` |
+| BNB Smart Chain | `testnet` | BSC Testnet | 97 | `https://bsc-testnet-rpc.publicnode.com` |
+| BNB Smart Chain | `local` | Anvil | 31337 | `http://127.0.0.1:8545` |
 
 Each launcher starts on its own mainnet by default. Select `--network testnet` or `--network local` for a run or shell session. `chain list` and `chain info [mainnet|testnet|local]` are read-only and show the selected profile's supported networks. The selected network is not saved between invocations; each profile's supported networks are fixed by its entrypoint.
 
@@ -33,9 +36,9 @@ Each launcher starts on its own mainnet by default. Select `--network testnet` o
 
 The `local` endpoint is loopback from the CLI process. In Docker, `127.0.0.1` points inside the wallet container and reaches Anvil only when Anvil shares its network namespace. To reach a host Anvil process, supply a host-reachable endpoint with `--rpc-url` and Docker networking that exposes it.
 
-The Ethereum launcher reads `ETHEREUM_WALLET_NETWORK`, `ETHEREUM_WALLET_RPC_URL`, `ETHEREUM_WALLET_CONFIG_DIR`, and `ETHEREUM_WALLET_IMAGE`. Monad reads `MONAD_WALLET_NETWORK`, `MONAD_WALLET_RPC_URL`, `MONAD_WALLET_CONFIG_DIR`, and `MONAD_WALLET_IMAGE`. CLI options `--network`, `--rpc-url`, and `--config-dir` override the matching environment values. Both launchers use `ghcr.io/vibe-wallets/ethereum-wallet-cli:main` by default and pull the selected remote image on each run. Use `ethereum-wallet-cli:local` only after `make build` and an explicit profile image override. The wrappers do not read host `.env` files automatically.
+The Ethereum launcher reads `ETHEREUM_WALLET_NETWORK`, `ETHEREUM_WALLET_RPC_URL`, `ETHEREUM_WALLET_CONFIG_DIR`, and `ETHEREUM_WALLET_IMAGE`. Monad reads `MONAD_WALLET_NETWORK`, `MONAD_WALLET_RPC_URL`, `MONAD_WALLET_CONFIG_DIR`, and `MONAD_WALLET_IMAGE`. BNB Smart Chain reads `BSC_WALLET_NETWORK`, `BSC_WALLET_RPC_URL`, `BSC_WALLET_CONFIG_DIR`, and `BSC_WALLET_IMAGE`. CLI options `--network`, `--rpc-url`, and `--config-dir` override the matching environment values. All launchers use `ghcr.io/vibe-wallets/ethereum-wallet-cli:main` by default and pull the selected remote image on each run. Use `ethereum-wallet-cli:local` only after `make build` and an explicit profile image override. The wrappers do not read host `.env` files automatically.
 
-For an Anvil instance in another Docker container, optionally set `ETHEREUM_WALLET_DOCKER_NETWORK` or `MONAD_WALLET_DOCKER_NETWORK` to a user-created Docker network name. The launcher passes this value only as Docker's `--network` setting. The wallet process does not receive it as an environment variable. With no setting, Docker uses its default network. Use an RPC URL reachable by the wallet container, for example `http://anvil:8545`; container loopback `127.0.0.1` does not point to the host or another container.
+For an Anvil instance in another Docker container, optionally set `ETHEREUM_WALLET_DOCKER_NETWORK`, `MONAD_WALLET_DOCKER_NETWORK`, or `BSC_WALLET_DOCKER_NETWORK` to a user-created Docker network name. The launcher passes this value only as Docker's `--network` setting. The wallet process does not receive it as an environment variable. With no setting, Docker uses its default network. Use an RPC URL reachable by the wallet container, for example `http://anvil:8545`; container loopback `127.0.0.1` does not point to the host or another container.
 
 ## Named wallets and defaults
 
@@ -49,6 +52,6 @@ Native coin amounts are entered in whole currency units, such as `0.01` ETH or M
 
 Avoid copying values through spreadsheets or tools that round large integers. JSON output may represent blockchain quantities as decimal or hexadecimal strings so clients can preserve their full precision.
 
-## Monad references
+## Chain references
 
-For up-to-date chain IDs and official RPC details, consult [Monad mainnet network information](https://docs.monad.xyz/developer-essentials/network-information) and [Monad testnet network information](https://docs.monad.xyz/developer-essentials/testnets). Network parameters and public endpoints can change. The CLI's displayed built-in configuration is what this build will use.
+For up-to-date chain IDs and official RPC details, consult [Monad mainnet network information](https://docs.monad.xyz/developer-essentials/network-information), [Monad testnet network information](https://docs.monad.xyz/developer-essentials/testnets), and the [BNB Smart Chain JSON-RPC endpoints](https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/json-rpc-endpoint/). Network parameters and public endpoints can change. The CLI's displayed built-in configuration is what this build will use. On BNB Smart Chain the base fee is pinned to 0 (BEP-226); the gas price is the real cost.
