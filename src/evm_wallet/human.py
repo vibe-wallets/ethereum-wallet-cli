@@ -31,6 +31,9 @@ ANSI: dict[Tone, str] = {
 RESET = "\x1b[0m"
 CLEAR_SCREEN = "\x1b[2J\x1b[H"
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+# Help headings may carry a lowercase parenthesized note, such as
+# "STAKING (Monad and BNB Smart Chain)".
+HEADING_NOTE_RE = re.compile(r"\s*\([^()]*\)\s*$")
 
 
 def _is_tty(stream: TextIO | None) -> bool:
@@ -266,15 +269,17 @@ def format_transaction_receipt(
 
 
 def style_help(text: str, *, enabled: bool | None = None, stream: TextIO | None = None) -> str:
-    """Add visual hierarchy to help output while leaving the content unchanged."""
+    """Add visual hierarchy to help output while leaving the content unchanged.
+
+    A heading is an unindented uppercase line, optionally followed by a
+    parenthesized note whose own case is not the heading's business, such as
+    ``STAKING (Monad and BNB Smart Chain)``. Wrapped prose is left alone even
+    when it ends with a colon.
+    """
     lines = text.split("\n")
     styled = []
     for line in lines:
-        stripped = line.strip()
-        is_heading = (
-            bool(stripped)
-            and stripped == line
-            and (stripped.endswith(":") or ANSI_RE.sub("", stripped).isupper())
-        )
+        label = ANSI_RE.sub("", HEADING_NOTE_RE.sub("", line.strip()))
+        is_heading = bool(label) and line.strip() == line and label.isupper()
         styled.append(section_title(line, enabled=enabled, stream=stream) if is_heading else line)
     return "\n".join(styled)

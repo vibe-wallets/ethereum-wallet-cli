@@ -2,9 +2,9 @@
 
 ``help`` prints the common command index; ``help --verbose`` (or a session started
 with ``--verbose``) additionally lists the advanced commands. ``help TOPIC``
-prints one focused page. Section headings are uppercase so
-:func:`evm_wallet.human.style_help` can style them on a terminal without changing
-the plain text.
+prints one focused page. Section headings are uppercase, with any lower-case
+parenthesized note ignored, so :func:`evm_wallet.human.style_help` can style them
+on a terminal without changing the plain text.
 """
 
 from __future__ import annotations

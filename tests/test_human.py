@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from evm_wallet.app import Application, execute
 from evm_wallet.cli import _render_human, _run_one
+from evm_wallet.help import help_text
 from evm_wallet.human import (
     CLEAR_SCREEN,
     action_preview,
@@ -135,10 +136,35 @@ class LayoutTests(unittest.TestCase):
         self.assertIn(f"Transaction: {signature}", receipt)
 
     def test_style_help_styles_only_headings(self):
-        styled = style_help("Commands:\n  wallet list\n\nNOTES\n  keep keys safe", enabled=True)
-        self.assertIn("\x1b[1;36mCommands:\x1b[0m", styled)
+        styled = style_help("NOTES\n  keep keys safe", enabled=True)
         self.assertIn("\x1b[1;36mNOTES\x1b[0m", styled)
-        self.assertIn("  wallet list", styled)
+        self.assertIn("  keep keys safe", styled)
+
+    def test_style_help_colors_a_heading_with_a_lower_case_note(self):
+        styled = style_help("STAKING (Monad and BNB Smart Chain)\n  stake validators", enabled=True)
+        self.assertIn("\x1b[1;36mSTAKING (Monad and BNB Smart Chain)\x1b[0m", styled)
+        self.assertIn("  stake validators", styled)
+
+    def test_every_help_section_heading_is_colored(self):
+        styled = style_help(help_text(), enabled=True)
+        for heading in (
+            "COMMANDS",
+            "WALLETS",
+            "TRANSFERS",
+            "STAKING (Monad and BNB Smart Chain)",
+            "INSPECTION",
+            "UTILITIES",
+        ):
+            self.assertIn(f"\x1b[1;36m{heading}\x1b[0m", styled)
+        # Left-margin prose stays plain, including lines that end with a colon.
+        self.assertNotIn("\x1b[1;36mAmounts are exact decimal", styled)
+        self.assertNotIn("\x1b[1;36mis an exact decimal", styled)
+
+    def test_style_help_leaves_wrapped_prose_alone(self):
+        prose = "is an exact decimal string such as 0.01. The command estimates gas first:"
+        styled = style_help(f"SEND NATIVE COIN\n{prose}", enabled=True)
+        self.assertIn("\x1b[1;36mSEND NATIVE COIN\x1b[0m", styled)
+        self.assertIn(f"\n{prose}", styled)
 
 
 class ClearAndRenderTests(unittest.TestCase):
