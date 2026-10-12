@@ -91,6 +91,23 @@ class LayoutTests(unittest.TestCase):
         narrow = table([["daily", address]], ["ALIAS", "ADDRESS"], width=10)
         self.assertEqual(narrow, f"ALIAS: daily\nADDRESS: {address}")
 
+    def test_table_right_aligns_the_columns_it_is_asked_to(self):
+        rendered = table(
+            [["97", "2211253252"], ["3", "218620885"]],
+            ["ID", "STAKE"],
+            width=40,
+            right_align=("STAKE",),
+        )
+        self.assertEqual(
+            rendered.splitlines(),
+            [
+                "ID       STAKE",
+                "--  ----------",
+                "97  2211253252",
+                "3    218620885",
+            ],
+        )
+
     def test_network_label_marks_mainnet_and_keeps_text_fallback(self):
         self.assertEqual(network_label("mainnet", enabled=False), "MAINNET · REAL FUNDS")
         self.assertEqual(network_label("testnet", enabled=False), "TESTNET")
@@ -352,6 +369,14 @@ class ClearAndRenderTests(unittest.TestCase):
         # Stake columns show whole MON; --json keeps the exact value.
         self.assertIn("218620885", validators.getvalue())
         self.assertNotIn("218620885.432720435926133658", validators.getvalue())
+        header_line, stake_line = (
+            line for line in validators.getvalue().splitlines() if line.startswith(("ID ", "3 "))
+        )
+        # Numbers end where their header ends: the stake column is right-aligned.
+        self.assertEqual(
+            header_line.index("STAKE (MON)") + len("STAKE (MON)"),
+            stake_line.index("218620885") + len("218620885"),
+        )
         self.assertIn(shorten_address("0x" + "bb" * 20), validators.getvalue())
         self.assertNotIn("SNAPSHOT (MON)", validators.getvalue())
 

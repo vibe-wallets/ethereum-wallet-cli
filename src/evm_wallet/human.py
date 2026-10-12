@@ -15,7 +15,7 @@ import os
 import re
 import sys
 import unicodedata
-from typing import Sequence, TextIO
+from typing import Collection, Sequence, TextIO
 
 Tone = str
 
@@ -164,11 +164,13 @@ def table(
     width: int | None = None,
     enabled: bool | None = None,
     stream: TextIO | None = None,
+    right_align: Collection[str] = (),
 ) -> str:
     """Render an aligned table, or labeled rows when it does not fit.
 
-    The compact form preserves full addresses rather than clipping values a
-    user may need to copy into a follow-up command.
+    Columns named in ``right_align`` (by header) are padded on the left, which
+    is what numeric columns want, and the compact form preserves full addresses
+    rather than clipping values a user may need to copy into a follow-up command.
     """
     data = [[str(cell) for cell in row] for row in rows]
     if not data and not headers:
@@ -180,6 +182,9 @@ def table(
         max(display_width(row[index]) if index < len(row) else 0 for row in all_rows)
         for index in range(columns)
     ]
+    aligned_right = {
+        index for index, header in enumerate(header_row or []) if header in right_align
+    }
     available = width if width is not None else terminal_width(stream)
     required = sum(widths) + max(0, columns - 1) * 2
     if header_row and required > available:
@@ -195,11 +200,11 @@ def table(
         return "\n\n".join(blocks)
 
     def format_row(row: Sequence[str]) -> str:
-        cells = [
-            (row[index] if index < len(row) else "")
-            + " " * (widths[index] - display_width(row[index] if index < len(row) else ""))
-            for index in range(columns)
-        ]
+        cells = []
+        for index in range(columns):
+            cell = row[index] if index < len(row) else ""
+            padding = " " * (widths[index] - display_width(cell))
+            cells.append(padding + cell if index in aligned_right else cell + padding)
         return "  ".join(cells).rstrip()
 
     lines = []

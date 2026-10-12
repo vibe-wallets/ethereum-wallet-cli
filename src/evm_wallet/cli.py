@@ -572,7 +572,10 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             if full:
                 columns.extend(["CONSENSUS (MON)", "SNAPSHOT (MON)"])
             columns.extend(["COMMISSION", "AUTH"])
-            print(table(rows, columns, stream=output), file=output)
+            print(
+                table(rows, columns, stream=output, right_align=VALIDATOR_NUMERIC_COLUMNS),
+                file=output,
+            )
         else:
             rows = [
                 [
@@ -588,6 +591,7 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
                     rows,
                     ["OPERATOR", "CONSENSUS", "STAKE (BNB)", "COMMISSION"],
                     stream=output,
+                    right_align=VALIDATOR_NUMERIC_COLUMNS,
                 ),
                 file=output,
             )
@@ -674,6 +678,15 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             )
     else:
         print(json.dumps(result, indent=2, sort_keys=True), file=output)
+
+
+VALIDATOR_NUMERIC_COLUMNS = (
+    "STAKE (MON)",
+    "CONSENSUS (MON)",
+    "SNAPSHOT (MON)",
+    "STAKE (BNB)",
+    "COMMISSION",
+)
 
 
 def _validators_title(result: dict[str, object], output: TextIO) -> str:
