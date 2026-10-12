@@ -127,7 +127,10 @@ On Monad, validators are identified by a numeric ID and stake is denominated in 
 
 ```text
 stake validators --limit 10
+stake validators --all
+stake validators --full --limit 5
 stake info 97
+stake info 97 --delegators
 stake status
 stake status 97
 stake delegate 97 100 --dry-run
@@ -139,6 +142,8 @@ stake compound 97
 ```
 
 Delegations below 1 gwei revert, and staking changes take effect at the next epoch boundary. Undelegating starts a withdrawal request; after the withdrawal delay you call `stake withdraw` with the same ID to reclaim the MON. `stake claim` withdraws accumulated rewards, while `stake compound` re-delegates them.
+
+`stake validators` lists the validators active in the current epoch, highest stake first, with a status decoded from the validator flags (`ok`, `low-stake`, `withdrawn`, `double-sign`). `--all` adds eligible validators outside the active set, and `--full` adds the consensus and next-epoch snapshot stakes and prints full addresses. One validator is read per row, so a large `--limit` takes proportionally longer. `stake info --delegators` pages through `getDelegators` for an exact delegator count, which can take a while for a popular validator.
 
 `status` lists the selected wallet's Monad delegations without any extra arguments.
 

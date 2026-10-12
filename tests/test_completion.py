@@ -63,6 +63,9 @@ class CompletionTests(unittest.TestCase):
             ],
         )
         self.assertIn("--limit", complete_candidates(["stake", "validators"], "--"))
+        self.assertIn("--all", complete_candidates(["stake", "validators"], "--"))
+        self.assertIn("--full", complete_candidates(["stake", "validators"], "--"))
+        self.assertIn("--delegators", complete_candidates(["stake", "info", "11"], "--"))
         self.assertIn("--withdraw-id", complete_candidates(["stake", "undelegate", "11"], "--"))
 
     def test_transfer_flags_complete_only_after_a_dash(self):

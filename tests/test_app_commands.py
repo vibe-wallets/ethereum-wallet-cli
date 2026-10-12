@@ -48,6 +48,8 @@ class FakeCastRunner:
         self.estimate = "51234\n"
         self.staking: dict[str, object] = {}
         self.contract_code: dict[str, str] = {}
+        self.validator_signature: str | None = None
+        self.validator_stakes: dict[str, object] = {}
 
     def __call__(self, command: list[str], **kwargs):
         self.calls.append((command, kwargs))
@@ -86,7 +88,11 @@ class FakeCastRunner:
             )
         elif args[:1] == ["call"]:
             signature = args[2]
-            if signature in self.staking:
+            if signature == self.validator_signature and args[3] in self.validator_stakes:
+                payload = list(self.staking[signature])  # type: ignore[arg-type]
+                payload[2] = self.validator_stakes[args[3]]
+                output = json.dumps(payload)
+            elif signature in self.staking:
                 output = json.dumps(self.staking[signature])
             elif signature == "transfer(address,uint256)":
                 output = "0x" + "0" * 63 + ("1" if self.transfer_success else "0")
@@ -787,6 +793,8 @@ class AppCommandTests(unittest.TestCase):
 
     MONAD_EPOCH = "getEpoch()(uint64,bool)"
     MONAD_VALSET = "getExecutionValidatorSet(uint32)(bool,uint32,uint64[])"
+    MONAD_CONSENSUS = "getConsensusValidatorSet(uint32)(bool,uint32,uint64[])"
+    MONAD_DELEGATORS = "getDelegators(uint64,address)(bool,address,address[])"
     MONAD_VALIDATOR = (
         "getValidator(uint64)(address,uint64,uint256,uint256,uint256,uint256,"
         "uint256,uint256,uint256,uint256,bytes,bytes)"
@@ -812,7 +820,13 @@ class AppCommandTests(unittest.TestCase):
     def _monad_staking(self) -> dict[str, object]:
         return {
             self.MONAD_EPOCH: [7, False],
-            self.MONAD_VALSET: [True, 0, [11, 22]],
+            self.MONAD_VALSET: [True, 0, [11, 22, 33]],
+            self.MONAD_CONSENSUS: [True, 0, [11, 22]],
+            self.MONAD_DELEGATORS: [
+                True,
+                "0x" + "00" * 20,
+                ["0x" + "11" * 20, "0x" + "12" * 20],
+            ],
             self.MONAD_VALIDATOR: [
                 ADDRESS,
                 "0",
@@ -886,6 +900,72 @@ class AppCommandTests(unittest.TestCase):
         self.assertEqual(status["delegations"][0]["validator_id"], 11)
         self.assertEqual(status["delegations"][0]["stake"], "1")
 
+    def test_monad_validators_list_active_validators_by_stake(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        self.runner.validator_signature = self.MONAD_VALIDATOR
+        # Validator 22 outranks 11, so the listing is reordered by stake.
+        self.runner.validator_stakes = {
+            "11": "1000000000000000000",
+            "22": "3000000000000000000",
+        }
+        app = self.make_app(profile="monad")
+        result = execute(["stake", "validators"], app)
+        self.assertEqual([item["validator_id"] for item in result["validators"]], [22, 11])
+        self.assertEqual(result["sorted_by"], "stake")
+        self.assertTrue(result["active_only"])
+        self.assertEqual(result["active_count"], 2)
+        self.assertEqual(result["eligible_count"], 2)
+        self.assertEqual(result["epoch"], 7)
+        self.assertEqual([item["status"] for item in result["validators"]], ["ok", "ok"])
+
+    def test_monad_validators_all_adds_eligible_validators(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        self.runner.validator_stakes = {"33": "9000000000000000000"}
+        app = self.make_app(profile="monad")
+        self.runner.validator_signature = self.MONAD_VALIDATOR
+
+        default = execute(["stake", "validators"], app)
+        self.assertEqual([item["validator_id"] for item in default["validators"]], [11, 22])
+
+        every = execute(["stake", "validators", "--all"], app)
+        self.assertEqual([item["validator_id"] for item in every["validators"]], [33, 11, 22])
+        self.assertFalse(every["active_only"])
+        self.assertEqual(every["active_count"], 2)
+        self.assertEqual(every["eligible_count"], 3)
+        self.assertEqual(every["validators"][0]["status"], "inactive")
+
+    def test_monad_validator_status_decodes_flags(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        payload = list(self.runner.staking[self.MONAD_VALIDATOR])
+        payload[1] = 5
+        self.runner.staking[self.MONAD_VALIDATOR] = payload
+        app = self.make_app(profile="monad")
+
+        info = execute(["stake", "info", "11"], app)
+        self.assertEqual(info["status"], "low-stake+double-sign")
+        self.assertEqual(info["flags"], 5)
+        self.assertIn(info["stake"], info["consensus_stake"])
+        self.assertNotIn("delegators", info)
+
+        payload[1] = 1 << 7
+        self.runner.staking[self.MONAD_VALIDATOR] = payload
+        unknown = execute(["stake", "info", "11"], app)
+        self.assertEqual(unknown["status"], "unknown:0x80")
+
+    def test_monad_validator_delegator_count_is_opt_in(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        app = self.make_app(profile="monad")
+        info = execute(["stake", "info", "11", "--delegators"], app)
+        self.assertEqual(info["delegators"], 2)
+        with self.assertRaisesRegex(WalletCliError, "Usage: stake info"):
+            execute(["stake", "info", "11", "22"], app)
+        with self.assertRaisesRegex(WalletCliError, "Usage: stake"):
+            execute(["stake", "validators", "--bogus"], app)
+
     def test_monad_stake_writes_build_expected_cast_arguments(self) -> None:
         self.add_wallet()
         app = self.make_app(terminal=True, profile="monad")
@@ -928,7 +1008,12 @@ class AppCommandTests(unittest.TestCase):
         validators = execute(["stake", "validators", "--limit", "2"], app)
         self.assertEqual(validators["validators"][0]["operator"], self.BSC_OPERATOR)
         self.assertEqual(validators["validators"][0]["commission"], "9.00")
-        self.assertEqual(validators["validators"][0]["stake"], "1")
+        # BNB Smart Chain listings are also highest stake first.
+        self.assertEqual(
+            [item["stake"] for item in validators["validators"]],
+            ["2", "1"],
+        )
+        self.assertEqual(validators["sorted_by"], "stake")
 
         info = execute(["stake", "info", self.BSC_OPERATOR], app)
         self.assertEqual(info["moniker"], "Mock Validator")

@@ -107,6 +107,14 @@ Staking on Monad and BNB Smart Chain
   Monad enumerates them with `getDelegations`; BNB Smart Chain reads the validator
   set with `getValidators` and batches the per-validator share lookups through the
   canonical Multicall3 contract, with a per-credit fallback for local chains.
+- `stake validators` lists the current epoch's active (consensus) validators,
+  which the precompile already returns ranked by stake, so ordering is exact
+  without reading the whole eligible set. Each row carries a status decoded from
+  the validator flags plus the auth address; `--all` appends eligible validators
+  outside the active set, and `--full` adds the consensus and next-epoch snapshot
+  stakes. `stake info` gained the same status plus an opt-in `--delegators` count
+  that pages `getDelegators`. Network-wide totals, APR, and validator names are
+  indexer data and are deliberately not invented.
 - Trace readability: a single argument longer than 320 characters (a Multicall3
   batch payload, for example) is shortened to a head and tail with `..N-omitted..`
   in the middle, so every invocation is still named without a multi-kilobyte line.
@@ -117,7 +125,7 @@ Staking on Monad and BNB Smart Chain
   plus `--chain-id 143`, which keeps the reported chain ID while freeing the
   address. Both profiles then perform a real signed delegation, verify the mock
   state, and check that plain `status` reports the resulting delegation.
-- Validation: 122 offline tests, plus the Docker E2E covering staking reads,
+- Validation: 127 offline tests, plus the Docker E2E covering staking reads,
   `status` delegations, dry-runs, a real signed write, and mock-state verification
   on Monad and BSC.
 

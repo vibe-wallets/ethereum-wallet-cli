@@ -38,7 +38,7 @@ TRANSFERS
   token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
 
 STAKING (Monad and BNB Smart Chain)
-  stake validators [--limit N]     List validators with stake and commission
+  stake validators [--limit N]     List active validators, highest stake first
   stake status [TARGET]            Show the epoch and your delegations
   stake info TARGET                Show one validator's details
   stake delegate TARGET AMOUNT [--dry-run | --yes]
@@ -201,13 +201,21 @@ Staking is available on Monad (validator IDs) and BNB Smart Chain (operator
 addresses). Reads are free. Delegate, undelegate, claim, withdraw, and compound
 sign a transaction through Foundry's hidden keystore prompt.
 
-stake validators [--limit N]
-  List validators with their total stake and commission.
+stake validators [--limit N] [--all] [--full]
+  List validators, highest stake first. By default only the active set for the
+  current epoch is listed; --all adds eligible validators outside it. Each row
+  carries a status decoded from the validator flags (ok, low-stake, withdrawn,
+  double-sign) and the auth address. --full adds the consensus and next-epoch
+  snapshot stakes and prints unshortened addresses. Read one validator per row,
+  so a large --limit is slow.
 stake status [TARGET]
   Show the current epoch and your delegations. On BNB Smart Chain, pass an
   operator address to see that validator's pool and your share balance.
-stake info TARGET
-  Show one validator's full details.
+stake info TARGET [--delegators]
+  Show one validator's full details: status, execution, consensus and snapshot
+  stake and commission, the unclaimed reward pool, and the consensus keys.
+  --delegators pages through getDelegators for an exact delegator count, which
+  can take a while for a large validator.
 stake delegate TARGET AMOUNT
   Add stake. Monad amounts are MON; BNB Smart Chain amounts are BNB.
 stake undelegate TARGET AMOUNT
@@ -224,6 +232,10 @@ stake compound VALIDATOR_ID               (Monad only)
 Writes estimate gas first and ask for confirmation unless --yes is given;
 --dry-run prints the estimate without signing. Monad staking changes take effect
 at the next epoch boundary.
+
+Validator names, network-wide stake totals, and APR estimates are not part of the
+staking precompile; they come from off-chain indexers, so this CLI does not
+invent them.
 """,
 }
 

@@ -35,7 +35,10 @@ gas estimation, signing, receipts, and read decoding end to end:
 - `MonadStakingMock.sol` is installed at `0x0000000000000000000000000000000000001000`
   (Monad's staking precompile). It implements the read views and the
   `delegate`/`undelegate`/`withdraw`/`claimRewards`/`compound` calls the wallet
-  uses, and records delegate stake in a public mapping.
+  uses, and records delegate stake in a public mapping. Its execution set holds
+  three validators while the consensus (active) set holds two, so the tests can
+  tell an active listing from `--all`; `getDelegators` returns a fixed page so the
+  opt-in delegator count can be exercised.
 - `StakeHubMock.sol` is installed at `0x0000000000000000000000000000000000002002`
   (BSC's StakeHub). It implements the validator views and the
   `delegate`/`undelegate`/`claim` calls, and points at the credit mock below.

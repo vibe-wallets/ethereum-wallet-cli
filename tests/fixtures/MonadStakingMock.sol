@@ -25,6 +25,28 @@ contract MonadStakingMock {
         return (true, 0, ids);
     }
 
+    /// The active set for the current epoch: the first two eligible validators.
+    function getConsensusValidatorSet(
+        uint32
+    ) external pure returns (bool, uint32, uint64[] memory) {
+        uint64[] memory ids = new uint64[](2);
+        ids[0] = 11;
+        ids[1] = 22;
+        return (true, 0, ids);
+    }
+
+    /// One page of delegators, so `stake info --delegators` can be exercised.
+    function getDelegators(
+        uint64,
+        address startDelegator
+    ) external pure returns (bool, address, address[] memory) {
+        address[] memory delegators = new address[](2);
+        delegators[0] = address(0x0000000000000000000000000000000000000011);
+        delegators[1] = address(0x0000000000000000000000000000000000000012);
+        // Report the page as complete regardless of the cursor so tests stay simple.
+        return (true, startDelegator, delegators);
+    }
+
     function getValidator(
         uint64
     )

@@ -61,7 +61,7 @@ Staking is delegated to each chain's own system contract or precompile; the CLI 
 
 All staking writes are real transactions: the CLI estimates gas, asks for confirmation unless `--yes` is given, and signs through Foundry's hidden keystore prompt. Reads (`stake status`, `stake validators`, `stake info`) are free. Staking commands are rejected on networks without a backend.
 
-`status` reports the selected wallet's delegations on both networks. Monad enumerates them directly; BNB Smart Chain reads validator credit contracts, batched through the canonical Multicall3 contract (with a per-credit fallback on local chains that lack it).
+`stake validators` on Monad lists the current epoch's active (consensus) validators, which the chain returns already ranked by stake; `--all` adds eligible validators outside that set. `status` reports the selected wallet's delegations on both networks. Monad enumerates them directly; BNB Smart Chain reads validator credit contracts, batched through the canonical Multicall3 contract (with a per-credit fallback on local chains that lack it).
 
 ## Chain references
 

@@ -77,9 +77,9 @@ token balance CONTRACT [ADDRESS]
 send DESTINATION AMOUNT [--dry-run | --yes]
 token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
 tx inspect HASH
-stake validators [--limit N]
+stake validators [--limit N] [--all] [--full]
 stake status [TARGET]
-stake info TARGET
+stake info TARGET [--delegators]
 stake delegate TARGET AMOUNT [--dry-run | --yes]
 stake undelegate TARGET AMOUNT [--dry-run | --yes]
 stake claim TARGET [--dry-run | --yes]
@@ -93,8 +93,10 @@ On Monad, `TARGET` is a validator ID and `AMOUNT` is MON; Monad also supports
 BNB Smart Chain, `TARGET` is a validator operator address and `AMOUNT` is BNB.
 Staking commands are read-only except the write verbs, which estimate gas, ask
 for confirmation unless `--yes` is given, and sign through Foundry's hidden
-keystore prompt. Run `help stake` for details. `status` lists the selected
-wallet's delegations on both networks as well.
+keystore prompt. Run `help stake` for details. `stake validators` lists the active
+validators for the current Monad epoch, highest stake first, with a status
+decoded from each validator's flags; `--all` adds eligible validators outside that
+set. `status` lists the selected wallet's delegations on both networks as well.
 
 The top-level options are `-c 'COMMAND'` / `--command 'COMMAND'` for a one-shot command, `--network mainnet|testnet|local` to choose a profile-supported network, `--rpc-url URL` to override its RPC endpoint, `--json` for JSON output, `--config-dir PATH` for an explicit state directory, and `--version`. Direct command arguments are also supported; when no command is supplied, the CLI opens its interactive shell. JSON output is available for one-shot commands only. Fresh invocations default to the entrypoint's mainnet; a selected network applies to that invocation or shell only.
 

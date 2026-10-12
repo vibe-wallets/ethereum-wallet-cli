@@ -35,10 +35,19 @@ MONAD_COMMISSION_BASE = 10**18
 BSC_COMMISSION_BASE = 10_000
 BSC_DEFAULT_LIMIT = 20
 BSC_MAX_LIMIT = 45
-MONAD_DEFAULT_LIMIT = 50
+MONAD_DEFAULT_LIMIT = 25
+# Monad validator flags: ok, stake too low, auth address withdrew below the
+# minimum, and slashed for double signing (see the staking precompile).
+MONAD_VALIDATOR_FLAGS = (
+    (1 << 0, "low-stake"),
+    (1 << 1, "withdrawn"),
+    (1 << 2, "double-sign"),
+)
+MONAD_KNOWN_FLAGS = sum(bit for bit, _ in MONAD_VALIDATOR_FLAGS)
 
 STAKING_USAGE = (
-    "Usage: stake status [TARGET] | stake validators [--limit N] | stake info TARGET | "
+    "Usage: stake status [TARGET] | stake validators [--limit N] [--all] [--full] | "
+    "stake info TARGET [--delegators] | "
     "stake delegate TARGET AMOUNT [--dry-run | --yes] | stake undelegate TARGET AMOUNT "
     "[--dry-run | --yes] | stake claim TARGET [--dry-run | --yes]. Monad also accepts "
     "stake withdraw VALIDATOR_ID WITHDRAW_ID and stake compound VALIDATOR_ID."
@@ -74,6 +83,14 @@ def _percent(rate: int, base: int) -> str:
     """Render an integer rate scaled by ``base`` as a percentage with two decimals."""
     hundredths = rate * 10_000 // base
     return f"{hundredths // 100}.{hundredths % 100:02d}"
+
+
+def _monad_status(flags: int) -> str:
+    """Render Monad validator flags as a short label such as ``low-stake``."""
+    labels = [name for bit, name in MONAD_VALIDATOR_FLAGS if flags & bit]
+    if flags & ~MONAD_KNOWN_FLAGS:
+        labels.append(f"unknown:{flags & ~MONAD_KNOWN_FLAGS:#x}")
+    return "+".join(labels) if labels else "ok"
 
 
 def _read(app: Application, chain: Chain, address: str, signature: str, *arguments: str) -> Any:
@@ -324,6 +341,7 @@ class MonadStaking(_StakingBackend):
 
     _EPOCH = "getEpoch()(uint64,bool)"
     _VALSET = "getExecutionValidatorSet(uint32)(bool,uint32,uint64[])"
+    _CONSENSUS = "getConsensusValidatorSet(uint32)(bool,uint32,uint64[])"
     _VALIDATOR = (
         "getValidator(uint64)(address,uint64,uint256,uint256,uint256,uint256,"
         "uint256,uint256,uint256,uint256,bytes,bytes)"
@@ -332,6 +350,7 @@ class MonadStaking(_StakingBackend):
         "getDelegator(uint64,address)(uint256,uint256,uint256,uint256,uint256,uint64,uint64)"
     )
     _DELEGATIONS = "getDelegations(address,uint64)(bool,uint64,uint64[])"
+    _DELEGATORS = "getDelegators(uint64,address)(bool,address,address[])"
 
     @staticmethod
     def _validator_id(value: str) -> int:
@@ -353,10 +372,12 @@ class MonadStaking(_StakingBackend):
         )
         stake = _as_int(data[2], "stake")
         rewards = _as_int(data[5], "unclaimed rewards")
+        flags = _as_int(data[1], "flags")
         return {
             "validator_id": validator_id,
             "auth_address": str(data[0]),
-            "flags": _as_int(data[1], "flags"),
+            "flags": flags,
+            "status": _monad_status(flags),
             "stake_wei": stake,
             "stake": format_units(stake, 18),
             "commission_rate": _as_int(data[4], "commission"),
@@ -376,23 +397,44 @@ class MonadStaking(_StakingBackend):
         }
 
     def _delegations(self, app: Application, chain: Chain, address: str) -> list[dict[str, Any]]:
-        validator_ids: list[int] = []
-        start = 0
-        while True:
-            data = _as_list(
-                _read(app, chain, self.address, self._DELEGATIONS, address, str(start)),
-                "delegations",
-            )
-            done = bool(data[0])
-            next_id = _as_int(data[1], "next validator id")
-            ids = [_as_int(item, "validator id") for item in _as_list(data[2], "validator ids")]
-            validator_ids.extend(ids)
-            if done or not ids or next_id <= start:
-                break
-            start = next_id
+        validator_ids = self._paginated_ids(app, chain, self._DELEGATIONS, "delegations", address)
         return [
             self._delegator(app, chain, validator_id, address) for validator_id in validator_ids
         ]
+
+    def _paginated_ids(
+        self, app: Application, chain: Chain, signature: str, label: str, *prefix: str
+    ) -> list[int]:
+        """Read every id from a paginated validator-set call, 100 at a time."""
+        ids: list[int] = []
+        start = 0
+        while True:
+            data = _as_list(_read(app, chain, self.address, signature, *prefix, str(start)), label)
+            done = bool(data[0])
+            next_index = _as_int(data[1], "next index")
+            batch = [_as_int(item, "validator id") for item in _as_list(data[2], "validator ids")]
+            ids.extend(batch)
+            if done or not batch or next_index <= start:
+                break
+            start = next_index
+        return ids
+
+    def _delegator_count(self, app: Application, chain: Chain, validator_id: int) -> int:
+        """Count a validator's delegators by paging through getDelegators."""
+        total = 0
+        start = "0x" + "00" * 20
+        while True:
+            data = _as_list(
+                _read(app, chain, self.address, self._DELEGATORS, str(validator_id), start),
+                "delegators",
+            )
+            done = bool(data[0])
+            next_delegator = _as_address(data[1], "next delegator")
+            total += len(_as_list(data[2], "delegators"))
+            if done or next_delegator.lower() == start.lower():
+                break
+            start = next_delegator
+        return total
 
     def _delegator(
         self, app: Application, chain: Chain, validator_id: int, address: str
@@ -442,42 +484,64 @@ class MonadStaking(_StakingBackend):
 
     def validators_command(self, app, state, chain, tokens) -> dict[str, Any]:
         limit, remaining = _limit_option(tokens, default=MONAD_DEFAULT_LIMIT, maximum=500)
+        include_all = "--all" in remaining
+        include_full = "--full" in remaining
+        remaining = [token for token in remaining if token not in {"--all", "--full"}]
         if remaining:
             raise WalletCliError(STAKING_USAGE)
-        validators: list[dict[str, Any]] = []
-        start = 0
-        while len(validators) < limit:
-            data = _as_list(
-                _read(app, chain, self.address, self._VALSET, str(start)), "validator set"
-            )
-            done = bool(data[0])
-            next_index = _as_int(data[1], "next index")
-            ids = [_as_int(item, "validator id") for item in _as_list(data[2], "validator ids")]
-            for validator_id in ids:
-                if len(validators) >= limit:
-                    break
-                validators.append(self._validator(app, chain, validator_id))
-            if done or not ids or next_index <= start:
-                break
-            start = next_index
+        epoch, in_delay = self._epoch(app, chain)
+        active_ids = self._paginated_ids(app, chain, self._CONSENSUS, "consensus validator set")
+        active_set = set(active_ids)
+        eligible_ids = active_ids
+        if include_all:
+            eligible_ids = self._paginated_ids(app, chain, self._VALSET, "validator set")
+        # The consensus set arrives ordered by stake, so its first `limit` ids are the top
+        # active validators. Only the eligible ids outside it need a read to be ranked
+        # alongside them, which keeps the default listing cheap.
+        window = active_ids[:limit] + [
+            validator_id for validator_id in eligible_ids if validator_id not in active_set
+        ]
+        validators = [self._validator(app, chain, validator_id) for validator_id in window]
+        for item in validators:
+            item["active"] = item["validator_id"] in active_set
+            if not item["active"] and item["flags"] == 0:
+                item["status"] = "inactive"
+        validators.sort(key=lambda item: -item["stake_wei"])
         return {
             "command": "stake validators",
             "chain": app.network_label(chain),
             "chain_id": chain.chain_id,
+            "epoch": epoch,
+            "in_epoch_delay": in_delay,
+            "active_only": not include_all,
+            "active_count": len(active_ids),
+            "eligible_count": len(eligible_ids),
+            "full": include_full,
+            "sorted_by": "stake",
             "limit": limit,
-            "validators": validators,
+            "validators": validators[:limit],
         }
 
     def info_command(self, app, state, chain, tokens) -> dict[str, Any]:
-        if len(tokens) != 1:
-            raise WalletCliError("Usage: stake info VALIDATOR_ID.")
-        info = self._validator(app, chain, self._validator_id(tokens[0]))
-        return {
+        include_delegators = "--delegators" in tokens
+        args = [token for token in tokens if token != "--delegators"]
+        if len(args) != 1:
+            raise WalletCliError("Usage: stake info VALIDATOR_ID [--delegators].")
+        validator_id = self._validator_id(args[0])
+        info = self._validator(app, chain, validator_id)
+        active_ids = self._paginated_ids(app, chain, self._CONSENSUS, "consensus validator set")
+        info["active"] = validator_id in set(active_ids)
+        if not info["active"] and info["flags"] == 0:
+            info["status"] = "inactive"
+        result = {
             "command": "stake info",
             "chain": app.network_label(chain),
             "chain_id": chain.chain_id,
             **info,
         }
+        if include_delegators:
+            result["delegators"] = self._delegator_count(app, chain, validator_id)
+        return result
 
     def delegate_command(self, app, state, chain, tokens) -> dict[str, Any]:
         dry_run, yes, args = self._amount_arguments(tokens)
@@ -865,8 +929,9 @@ class BscStaking(_StakingBackend):
             "command": "stake validators",
             "chain": app.network_label(chain),
             "chain_id": chain.chain_id,
+            "sorted_by": "stake",
             "limit": limit,
-            "validators": validators,
+            "validators": sorted(validators, key=lambda item: -item["stake_wei"]),
         }
 
     def info_command(self, app, state, chain, tokens) -> dict[str, Any]:

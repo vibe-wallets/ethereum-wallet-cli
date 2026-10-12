@@ -318,6 +318,66 @@ class ClearAndRenderTests(unittest.TestCase):
             {
                 "command": "stake validators",
                 "chain": "mainnet",
+                "epoch": 2257,
+                "active_only": True,
+                "active_count": 196,
+                "full": False,
+                "validators": [
+                    {
+                        "validator_id": 3,
+                        "status": "ok",
+                        "stake": "218620885.432720435926133658",
+                        "consensus_stake": "218620885.432720435926133658",
+                        "snapshot_stake": "218620885.432720435926133658",
+                        "commission": "15.00",
+                        "auth_address": "0x" + "bb" * 20,
+                    }
+                ],
+            },
+            validators,
+        )
+        self.assertIn("VALIDATORS", validators.getvalue())
+        self.assertIn("epoch 2257", validators.getvalue())
+        self.assertIn("196 active", validators.getvalue())
+        self.assertIn("STATUS", validators.getvalue())
+        self.assertIn("15.00%", validators.getvalue())
+        self.assertIn(shorten_address("0x" + "bb" * 20), validators.getvalue())
+        self.assertNotIn("SNAPSHOT (MON)", validators.getvalue())
+
+        full = io.StringIO()
+        _render_human(
+            {
+                "command": "stake validators",
+                "chain": "mainnet",
+                "epoch": 2257,
+                "active_only": False,
+                "active_count": 196,
+                "eligible_count": 201,
+                "full": True,
+                "validators": [
+                    {
+                        "validator_id": 3,
+                        "status": "inactive",
+                        "stake": "1",
+                        "consensus_stake": "1",
+                        "snapshot_stake": "1",
+                        "commission": "15.00",
+                        "auth_address": "0x" + "bb" * 20,
+                    }
+                ],
+            },
+            full,
+        )
+        self.assertIn("201 eligible", full.getvalue())
+        self.assertIn("SNAPSHOT (MON)", full.getvalue())
+        self.assertIn("inactive", full.getvalue())
+        self.assertIn("0x" + "bb" * 20, full.getvalue())
+
+        bsc_validators = io.StringIO()
+        _render_human(
+            {
+                "command": "stake validators",
+                "chain": "mainnet",
                 "validators": [
                     {
                         "operator": "0x" + "bb" * 20,
@@ -327,10 +387,10 @@ class ClearAndRenderTests(unittest.TestCase):
                     }
                 ],
             },
-            validators,
+            bsc_validators,
         )
-        self.assertIn("VALIDATORS", validators.getvalue())
-        self.assertIn("9.00%", validators.getvalue())
+        self.assertIn("OPERATOR", bsc_validators.getvalue())
+        self.assertIn("9.00%", bsc_validators.getvalue())
 
         preview = io.StringIO()
         _render_human(

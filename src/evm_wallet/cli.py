@@ -545,23 +545,28 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
                 )
     elif command == "stake validators":
         validators = result.get("validators", [])
-        print(section_title("VALIDATORS", stream=output), file=output)
+        print(_validators_title(result, output), file=output)
         if not validators:
             print(color("No validators returned.", "muted", stream=output), file=output)
         elif "validator_id" in validators[0]:
-            rows = [
-                [
+            full = bool(result.get("full"))
+            rows = []
+            for item in validators:
+                auth = str(item["auth_address"])
+                row: list[object] = [
                     str(item["validator_id"]),
-                    item["stake"],
-                    f"{item['commission']}%",
-                    item["auth_address"],
+                    str(item["status"]),
+                    str(item["stake"]),
                 ]
-                for item in validators
-            ]
-            print(
-                table(rows, ["ID", "STAKE (MON)", "COMMISSION", "AUTH ADDRESS"], stream=output),
-                file=output,
-            )
+                if full:
+                    row.extend([str(item["consensus_stake"]), str(item["snapshot_stake"])])
+                row.extend([f"{item['commission']}%", auth if full else shorten_address(auth)])
+                rows.append(row)
+            columns = ["ID", "STATUS", "STAKE (MON)"]
+            if full:
+                columns.extend(["CONSENSUS (MON)", "SNAPSHOT (MON)"])
+            columns.extend(["COMMISSION", "AUTH"])
+            print(table(rows, columns, stream=output), file=output)
         else:
             rows = [
                 [item["operator"], item["consensus"], item["stake"], f"{item['commission']}%"]
@@ -579,7 +584,9 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
         if "validator_id" in result:
             rows = [
                 ("Validator", str(result["validator_id"])),
+                ("Status", str(result.get("status", "ok"))),
                 ("Network", network_label(str(result["chain"]), stream=output)),
+                ("Active", "yes" if result.get("active", True) else "no"),
                 ("Auth address", result["auth_address"]),
                 ("Stake", f"{result['stake']} MON", "emphasis"),
                 ("Commission", f"{result['commission']}%"),
@@ -589,9 +596,11 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
                 ("Snapshot commission", f"{result['snapshot_commission']}%"),
                 ("Unclaimed rewards", f"{result['unclaimed_rewards']} MON"),
                 ("Flags", str(result["flags"])),
-                ("SECP pubkey", shorten_address(result["secp_pubkey"], leading=10, trailing=6)),
-                ("BLS pubkey", shorten_address(result["bls_pubkey"], leading=10, trailing=6)),
+                ("SECP pubkey", result["secp_pubkey"]),
+                ("BLS pubkey", result["bls_pubkey"]),
             ]
+            if "delegators" in result:
+                rows.insert(4, ("Delegators", str(result["delegators"])))
             print(section_title("VALIDATOR", stream=output), file=output)
             print(key_value_rows(rows, stream=output), file=output)
         else:
@@ -654,6 +663,18 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             )
     else:
         print(json.dumps(result, indent=2, sort_keys=True), file=output)
+
+
+def _validators_title(result: dict[str, object], output: TextIO) -> str:
+    """Title the validator list with the epoch and the number of validators shown."""
+    title = section_title("VALIDATORS", stream=output)
+    epoch = result.get("epoch")
+    if epoch is None:
+        return title
+    scope = "active" if result.get("active_only", True) else "eligible"
+    key = "active_count" if result.get("active_only", True) else "eligible_count"
+    suffix = f" · epoch {epoch} · {result.get(key)} {scope}"
+    return f"{title}{color(suffix, 'muted', stream=output)}"
 
 
 def _print_delegations(delegations: Sequence[dict[str, object]], output: TextIO) -> None:

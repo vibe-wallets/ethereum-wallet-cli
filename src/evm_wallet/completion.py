@@ -68,7 +68,10 @@ SUBCOMMANDS: dict[str, list[str]] = {
 NETWORKS = ["local", "mainnet", "testnet"]
 TRANSFER_FLAGS = ["--dry-run", "--yes"]
 STAKING_FLAGS = [
+    "--all",
+    "--delegators",
     "--dry-run",
+    "--full",
     "--limit",
     "--no-vote-power",
     "--shares",
