@@ -55,6 +55,11 @@ BSC_STAKE_CREDIT_MOCK_RUNTIME = (
     .strip()
 )
 BSC_MOCK_OPERATOR = "0x00000000000000000000000000000000000000bb"
+# BSC has the canonical Multicall3 deployed; batch the delegator-share reads there.
+MULTICALL3_MOCK = "0xcA11bde05977b3631167028862bE2a173976CA11"
+MULTICALL3_MOCK_RUNTIME = (
+    (ROOT / "tests" / "fixtures" / "Multicall3Mock.runtime.hex").read_text(encoding="utf-8").strip()
+)
 SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 
 
@@ -211,6 +216,7 @@ class DockerAnvilSandbox:
         self.cast_rpc(alias, "anvil_setCode", MONAD_STAKING_MOCK, MONAD_STAKING_MOCK_RUNTIME)
         self.cast_rpc(alias, "anvil_setCode", BSC_STAKE_HUB_MOCK, BSC_STAKE_HUB_MOCK_RUNTIME)
         self.cast_rpc(alias, "anvil_setCode", BSC_STAKE_CREDIT_MOCK, BSC_STAKE_CREDIT_MOCK_RUNTIME)
+        self.cast_rpc(alias, "anvil_setCode", MULTICALL3_MOCK, MULTICALL3_MOCK_RUNTIME)
         owner_slot = _run_docker(
             "exec",
             self.containers[alias],
@@ -796,6 +802,10 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
                         "11",
                     ),
                 )
+                staking_status = shell.command("status")
+                self.assertIn("DELEGATIONS", staking_status)
+                self.assertIn("VALIDATOR", staking_status)
+                self.assertIn("\n11", staking_status)
             elif profile == "bsc":
                 stake_status = shell.command("stake status")
                 self.assertIn("STAKING STATUS", stake_status)
@@ -809,6 +819,10 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
                 self.assertIn("Mock Validator", stake_info)
                 stake_status_operator = shell.command(f"stake status {BSC_MOCK_OPERATOR}")
                 self.assertIn("DELEGATION", stake_status_operator)
+                staking_status = shell.command("status")
+                self.assertIn("DELEGATIONS", staking_status)
+                self.assertIn("No delegations found", staking_status)
+                self.assertIn("aggregate3", staking_status)
                 stake_dry = shell.command(f"stake delegate {BSC_MOCK_OPERATOR} 1 --dry-run")
                 self.assertIn("STAKE DELEGATE", stake_dry)
                 self.assertIn("1 BNB", stake_dry)
@@ -830,6 +844,9 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
                         node_alias, BSC_STAKE_HUB_MOCK, "delegated(address)(uint256)", account
                     ),
                 )
+                staking_status_after = shell.command("status")
+                self.assertIn(BSC_MOCK_OPERATOR.lower(), staking_status_after.lower())
+                self.assertNotIn("No delegations found", staking_status_after)
 
             scratch = shell.command(
                 "wallet new scratch",

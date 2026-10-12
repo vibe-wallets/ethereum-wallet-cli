@@ -61,6 +61,8 @@ Staking is delegated to each chain's own system contract or precompile; the CLI 
 
 All staking writes are real transactions: the CLI estimates gas, asks for confirmation unless `--yes` is given, and signs through Foundry's hidden keystore prompt. Reads (`stake status`, `stake validators`, `stake info`) are free. Staking commands are rejected on networks without a backend.
 
+`status` reports the selected wallet's delegations on both networks. Monad enumerates them directly; BNB Smart Chain reads validator credit contracts, batched through the canonical Multicall3 contract (with a per-credit fallback on local chains that lack it).
+
 ## Chain references
 
 For up-to-date chain IDs and official RPC details, consult [Monad mainnet network information](https://docs.monad.xyz/developer-essentials/network-information), [Monad testnet network information](https://docs.monad.xyz/developer-essentials/testnets), and the [BNB Smart Chain JSON-RPC endpoints](https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/json-rpc-endpoint/). Network parameters and public endpoints can change. The CLI's displayed built-in configuration is what this build will use. On BNB Smart Chain the base fee is pinned to 0 (BEP-226); the gas price is the real cost.

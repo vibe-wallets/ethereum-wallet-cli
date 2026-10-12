@@ -140,8 +140,8 @@ class CastClient:
             pass
         return output
 
-    @staticmethod
-    def _display_command(command: list[str]) -> str:
+    @classmethod
+    def _display_command(cls, command: list[str]) -> str:
         public_urls = {
             "https://ethereum-rpc.publicnode.com",
             "https://ethereum-sepolia-rpc.publicnode.com",
@@ -154,7 +154,21 @@ class CastClient:
         for index, value in enumerate(shown[:-1]):
             if value == "--rpc-url" and shown[index + 1] not in public_urls:
                 shown[index + 1] = "<redacted-rpc-url>"
+        shown = [cls._shorten_argument(value) for value in shown]
         return shlex.join(shown)
+
+    # A single ABI-encoded blob (for example a Multicall3 batch) can be thousands of
+    # characters long. Keep a readable head and tail and state how much was elided so
+    # the trace still names every invocation without flooding the terminal.
+    TRACE_ARGUMENT_LIMIT = 320
+
+    @classmethod
+    def _shorten_argument(cls, value: str) -> str:
+        if len(value) <= cls.TRACE_ARGUMENT_LIMIT:
+            return value
+        keep = cls.TRACE_ARGUMENT_LIMIT // 2
+        omitted = len(value) - 2 * keep
+        return f"{value[:keep]}..{omitted}-omitted..{value[-keep:]}"
 
     def verify_chain(self, chain: Chain) -> None:
         """Refuse to continue when the endpoint reports a different chain ID."""

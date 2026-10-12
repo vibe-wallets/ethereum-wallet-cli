@@ -88,7 +88,7 @@ nonce 0xOtherAddress
 gas
 ```
 
-`status` verifies the network and shows the selected wallet, address, and native balance. `nonce` shows the next transaction nonce (counting pending transactions). `gas` shows the current gas price in wei and gwei; it is an estimate, not a fee guarantee.
+`status` verifies the network and shows the selected wallet, address, and native balance. On Monad and BNB Smart Chain it also lists the wallet's staking delegations. `nonce` shows the next transaction nonce (counting pending transactions). `gas` shows the current gas price in wei and gwei; it is an estimate, not a fee guarantee.
 
 ## Simulate and send native coin
 
@@ -140,6 +140,8 @@ stake compound 97
 
 Delegations below 1 gwei revert, and staking changes take effect at the next epoch boundary. Undelegating starts a withdrawal request; after the withdrawal delay you call `stake withdraw` with the same ID to reclaim the MON. `stake claim` withdraws accumulated rewards, while `stake compound` re-delegates them.
 
+`status` lists the selected wallet's Monad delegations without any extra arguments.
+
 ## Stake on BNB Smart Chain
 
 On BNB Smart Chain, validators are identified by an operator address and stake is denominated in BNB:
@@ -157,6 +159,8 @@ stake claim 0xValidatorOperatorAddress 0
 ```
 
 Validators are listed with their stake and commission. `stake delegate` accepts the minimum delegation set by the network (currently 1 BNB). `stake undelegate` converts a BNB amount to validator shares; pass `--shares` to specify shares directly. Undelegated BNB becomes claimable after the unbonding period, and `stake claim` with request number `0` claims from all unbonding requests.
+
+`status` lists the selected wallet's delegations. Because StakeHub keeps delegations per validator, the CLI reads the validator set and batches the share lookups through the canonical Multicall3 contract, so the scan costs a handful of calls rather than one per validator.
 
 ## Shell utilities and completion
 
@@ -305,4 +309,4 @@ Successful JSON output has an `ok: true` field, a `command` name, and command-sp
 
 Errors from command execution are written as `{"ok": false, "error": "..."}` to standard error and exit with status 1. Blockchain quantities and token raw amounts are strings so callers can preserve integer precision. JSON mode applies to a one-shot command; the interactive shell uses human-readable output.
 
-Every command also writes a trace to standard error after it completes or fails. Each line is `[wrapper]` followed by the shell-quoted Cast argv; the trace includes chain-ID checks, simulations, and sends. Commands handled locally print `[wrapper] No external command ran (local command).` Custom and local RPC URLs are masked as `<redacted-rpc-url>`; bundled public endpoint URLs remain visible. Private keys and passphrases are never included. For automation, parse successful JSON from standard output and keep standard error separate. On failure, use the exit status and inspect the error JSON record and trace in standard error instead of parsing the whole stream as one JSON value.
+Every command also writes a trace to standard error after it completes or fails. Each line is `[wrapper]` followed by the shell-quoted Cast argv; the trace includes chain-ID checks, simulations, and sends. Commands handled locally print `[wrapper] No external command ran (local command).` Custom and local RPC URLs are masked as `<redacted-rpc-url>`; bundled public endpoint URLs remain visible. A single argument longer than 320 characters (for example a batched Multicall3 payload) is shortened to a head and tail with `..N-omitted..` in the middle, so the trace stays readable while still naming every invocation. Private keys and passphrases are never included. For automation, parse successful JSON from standard output and keep standard error separate. On failure, use the exit status and inspect the error JSON record and trace in standard error instead of parsing the whole stream as one JSON value.

@@ -127,6 +127,10 @@ status
   Verify the selected network, then show the selected wallet, its address, and
   its native coin balance. If no wallet is selected, it still checks the network
   and reports that no wallet is active.
+
+  On Monad and BNB Smart Chain it also lists the wallet's staking delegations,
+  which costs a few extra read-only calls. `stake status` shows the same data
+  with more detail. Other networks have no staking backend and skip it.
 """,
     "send": """SEND NATIVE COIN
 

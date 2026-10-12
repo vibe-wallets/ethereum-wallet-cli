@@ -24,7 +24,7 @@ from .config import ConfigStore, validate_alias, validate_contact_name, validate
 from .errors import ConfigurationError, FoundryError, WalletCliError
 from .foundry import CastClient, parse_integer_output, unwrap_cast_json
 from .help import help_text
-from .staking import handle_stake
+from .staking import handle_stake, status_delegations
 from .txlog import TXLOG_LIMIT, append_transaction, read_transactions
 
 KEYSTORE_ADDRESS_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -1470,6 +1470,9 @@ def _status(app: Application) -> dict[str, Any]:
                 "balance_native": format_units(raw, 18),
             }
         )
+        delegations = status_delegations(app, chain, address)
+        if delegations is not None:
+            result["delegations"] = delegations
     else:
         app.cast.verify_chain(chain)
     return result

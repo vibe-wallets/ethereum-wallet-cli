@@ -1,5 +1,7 @@
 # Project instructions
 
+- Long ABI blobs (such as a Multicall3 batch) are shortened in the trace to a head
+  and tail with `..N-omitted..` in the middle; the invocation itself is always shown.
 - After each command the user runs, the wallet CLI must display exactly which
   underlying wrapper commands it executed. Show every Foundry invocation,
   including checks, simulations and sends, after the user command completes or

@@ -9,6 +9,12 @@ contract StakeCreditMock {
     mapping(address => uint256) public shares;
     mapping(address => uint256) public pooled;
 
+    /// Mint shares and pool BNB for a delegator; only :contract:`StakeHubMock` calls this.
+    function credit(address account, uint256 amount) external {
+        shares[account] += amount;
+        pooled[account] += amount;
+    }
+
     function balanceOf(address account) external view returns (uint256) {
         return shares[account];
     }

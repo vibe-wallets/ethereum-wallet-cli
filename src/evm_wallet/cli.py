@@ -151,6 +151,8 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             rows.append(("Balance", result["balance_native"], "emphasis"))
         print(section_title("STATUS", stream=output), file=output)
         print(key_value_rows(rows, stream=output), file=output)
+        if result.get("delegations") is not None:
+            _print_delegations(result["delegations"], output)
     elif command == "balance":
         rows = [
             ("Address", result["address"]),
@@ -506,31 +508,7 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             ]
             print(section_title("STAKING STATUS", stream=output), file=output)
             print(key_value_rows(rows, stream=output), file=output)
-            delegations = result.get("delegations", [])
-            print(section_title("DELEGATIONS", stream=output), file=output)
-            if not delegations:
-                print(
-                    color("No delegations found for this wallet.", "muted", stream=output),
-                    file=output,
-                )
-            else:
-                table_rows = [
-                    [
-                        str(item["validator_id"]),
-                        item["stake"],
-                        item["unclaimed_rewards"],
-                        item["pending_stake"],
-                    ]
-                    for item in delegations
-                ]
-                print(
-                    table(
-                        table_rows,
-                        ["VALIDATOR", "STAKE (MON)", "UNCLAIMED", "PENDING"],
-                        stream=output,
-                    ),
-                    file=output,
-                )
+            _print_delegations(result.get("delegations", []), output)
         else:
             parameters = result.get("parameters", {})
             rows = [
@@ -676,6 +654,41 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             )
     else:
         print(json.dumps(result, indent=2, sort_keys=True), file=output)
+
+
+def _print_delegations(delegations: Sequence[dict[str, object]], output: TextIO) -> None:
+    """Print one delegations block, choosing Monad or BNB Smart Chain columns."""
+    print(section_title("DELEGATIONS", stream=output), file=output)
+    if not delegations:
+        print(
+            color("No delegations found for this wallet.", "muted", stream=output),
+            file=output,
+        )
+        return
+    if "validator_id" in delegations[0]:
+        rows = [
+            [
+                str(item["validator_id"]),
+                str(item["stake"]),
+                str(item["unclaimed_rewards"]),
+                str(item["pending_stake"]),
+            ]
+            for item in delegations
+        ]
+        columns = ["VALIDATOR", "STAKE (MON)", "UNCLAIMED", "PENDING"]
+    else:
+        rows = [
+            [
+                str(item["operator"]),
+                str(item["pooled_bnb"]),
+                f"{item['commission']}%",
+                str(item["pending_unbond_requests"]),
+                str(item["claimable_unbond_requests"]),
+            ]
+            for item in delegations
+        ]
+        columns = ["OPERATOR", "POOLED (BNB)", "COMMISSION", "UNBONDING", "CLAIMABLE"]
+    print(table(rows, columns, stream=output), file=output)
 
 
 def _print_error(message: str, *, json_output: bool, output: TextIO | None = None) -> None:

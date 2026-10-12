@@ -103,14 +103,23 @@ Staking on Monad and BNB Smart Chain
   so signing stays in Foundry and secrets never touch argv.
 - Staking commands are shown in the default help (not hidden as advanced) and are
   documented in `help stake`, the README, and the command cookbook.
+- `status` now lists the active wallet's delegations on Monad and BNB Smart Chain.
+  Monad enumerates them with `getDelegations`; BNB Smart Chain reads the validator
+  set with `getValidators` and batches the per-validator share lookups through the
+  canonical Multicall3 contract, with a per-credit fallback for local chains.
+- Trace readability: a single argument longer than 320 characters (a Multicall3
+  batch payload, for example) is shortened to a head and tail with `..N-omitted..`
+  in the middle, so every invocation is still named without a multi-kilobyte line.
 - Docker E2E: because Monad's staking is a precompile, the suite installs compiled
-  mock contracts with `anvil_setCode` at `0x1000` (Monad) and `0x2002`/`0x3003`
-  (BSC). Anvil reserves `0x1000` for chain ID 143, so the Monad node runs with
-  `--network ethereum --chain-id 143`, which keeps the reported chain ID while
-  freeing the address. Both profiles then perform a real signed delegation and the
-  mock state is verified.
-- Validation: 119 offline tests, plus the Docker E2E covering staking reads,
-  dry-runs, a real signed write, and mock-state verification on Monad and BSC.
+  mock contracts with `anvil_setCode` at `0x1000` (Monad), `0x2002`/`0x3003` (BSC),
+  and a `Multicall3Mock` at the canonical Multicall3 address. Anvil reserves
+  `0x1000` for chain ID 143, so the Monad node runs with `--network ethereum`
+  plus `--chain-id 143`, which keeps the reported chain ID while freeing the
+  address. Both profiles then perform a real signed delegation, verify the mock
+  state, and check that plain `status` reports the resulting delegation.
+- Validation: 122 offline tests, plus the Docker E2E covering staking reads,
+  `status` delegations, dry-runs, a real signed write, and mock-state verification
+  on Monad and BSC.
 
 Distribution decision and delivery fix
 - The GHCR package is distributed privately. The `publish` job publishes the immutable

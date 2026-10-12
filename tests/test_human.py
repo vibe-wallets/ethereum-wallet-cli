@@ -176,6 +176,60 @@ class ClearAndRenderTests(unittest.TestCase):
         self.assertIn("STATUS", status.getvalue())
         self.assertIn("MAINNET · REAL FUNDS", status.getvalue())
         self.assertIn("Balance : 1.5", status.getvalue())
+        self.assertNotIn("DELEGATIONS", status.getvalue())
+
+        staked = io.StringIO()
+        _render_human(
+            {
+                "command": "status",
+                "profile": "monad",
+                "network": "mainnet",
+                "chain_id": 143,
+                "rpc_url": "https://rpc.monad.xyz",
+                "wallet": "daily",
+                "address": "0x" + "11" * 20,
+                "balance_native": "1.5",
+                "delegations": [
+                    {
+                        "validator_id": 11,
+                        "stake": "1",
+                        "unclaimed_rewards": "0.5",
+                        "pending_stake": "0",
+                    }
+                ],
+            },
+            staked,
+        )
+        self.assertIn("DELEGATIONS", staked.getvalue())
+        self.assertIn("VALIDATOR", staked.getvalue())
+        self.assertIn("0.5", staked.getvalue())
+
+        bsc_staked = io.StringIO()
+        _render_human(
+            {
+                "command": "status",
+                "profile": "bsc",
+                "network": "mainnet",
+                "chain_id": 56,
+                "rpc_url": "https://bsc-rpc.publicnode.com",
+                "wallet": "daily",
+                "address": "0x" + "11" * 20,
+                "balance_native": "1.5",
+                "delegations": [
+                    {
+                        "operator": "0x" + "bb" * 20,
+                        "pooled_bnb": "3",
+                        "commission": "9.00",
+                        "pending_unbond_requests": 1,
+                        "claimable_unbond_requests": 0,
+                    }
+                ],
+            },
+            bsc_staked,
+        )
+        self.assertIn("DELEGATIONS", bsc_staked.getvalue())
+        self.assertIn("POOLED (BNB)", bsc_staked.getvalue())
+        self.assertIn("9.00%", bsc_staked.getvalue())
 
         gas = io.StringIO()
         _render_human(

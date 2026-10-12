@@ -41,6 +41,11 @@ gas estimation, signing, receipts, and read decoding end to end:
   `delegate`/`undelegate`/`claim` calls, and points at the credit mock below.
 - `StakeCreditMock.sol` is installed at `0x0000000000000000000000000000000000003003`
   (a BSC per-validator credit/share contract).
+- `Multicall3Mock.sol` is installed at the canonical Multicall3 address
+  `0xcA11bde05977b3631167028862bE2a173976CA11`. BSC has the real Multicall3
+  deployed, and the wallet batches delegator-share reads through it (`status`
+  scans every validator's credit contract); local Anvil nodes do not, so the
+  mock keeps the suite on the wallet's normal batched read path.
 
 The E2E starts every Anvil node with `--network ethereum`, so the Monad node
 reports chain ID 143 for the wallet's chain check while `0x1000` remains

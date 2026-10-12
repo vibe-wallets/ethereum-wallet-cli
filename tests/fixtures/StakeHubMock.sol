@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
+/// Minimal credit/share contract interface used by :contract:`StakeHubMock`.
+interface StakeCreditMock {
+    function credit(address account, uint256 amount) external;
+}
+
 /// Minimal stand-in for the BSC StakeHub system contract at 0x2002.
 ///
 /// The Docker E2E installs this runtime at 0x2002 with `anvil_setCode`, so the
@@ -55,6 +60,17 @@ contract StakeHubMock {
         return OPERATOR;
     }
 
+    function getValidators(
+        uint256,
+        uint256
+    ) external pure returns (address[] memory, address[] memory, uint256) {
+        address[] memory operators = new address[](1);
+        operators[0] = OPERATOR;
+        address[] memory credits = new address[](1);
+        credits[0] = CREDIT;
+        return (operators, credits, 1);
+    }
+
     function getValidatorCommission(
         address
     ) external pure returns (uint64, uint64, uint64) {
@@ -78,6 +94,7 @@ contract StakeHubMock {
     function delegate(address, bool) external payable {
         require(msg.value >= 1 ether, "min delegation");
         delegated[msg.sender] += msg.value;
+        StakeCreditMock(CREDIT).credit(msg.sender, msg.value);
     }
 
     function undelegate(address, uint256 shares) external pure {

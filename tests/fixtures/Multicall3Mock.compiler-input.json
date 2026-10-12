@@ -1,0 +1,25 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "Multicall3Mock.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity 0.8.30;\n\n/// Minimal Multicall3 stand-in for the Docker E2E.\n///\n/// BSC mainnet and testnet have the canonical Multicall3 deployed, which the\n/// wallet batches delegator-share reads through. Local Anvil nodes do not, so the\n/// E2E installs this runtime at the canonical address with `anvil_setCode` to keep\n/// the wallet on its normal batched read path.\ncontract Multicall3Mock {\n    struct Call3 {\n        address target;\n        bool allowFailure;\n        bytes callData;\n    }\n\n    struct Result {\n        bool success;\n        bytes returnData;\n    }\n\n    function aggregate3(Call3[] calldata calls) external payable returns (Result[] memory results) {\n        results = new Result[](calls.length);\n        for (uint256 index; index < calls.length; ++index) {\n            (bool success, bytes memory returnData) = calls[index].target.call(calls[index].callData);\n            if (!success && !calls[index].allowFailure) {\n                assembly {\n                    revert(add(returnData, 32), mload(returnData))\n                }\n            }\n            results[index] = Result(success, returnData);\n        }\n    }\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "none"
+    },
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.deployedBytecode.object"
+        ]
+      }
+    }
+  }
+}

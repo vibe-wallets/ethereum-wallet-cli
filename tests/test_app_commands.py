@@ -47,6 +47,7 @@ class FakeCastRunner:
         self.receipt_sequence: list[str] = []
         self.estimate = "51234\n"
         self.staking: dict[str, object] = {}
+        self.contract_code: dict[str, str] = {}
 
     def __call__(self, command: list[str], **kwargs):
         self.calls.append((command, kwargs))
@@ -63,6 +64,10 @@ class FakeCastRunner:
             output = self.base_fee
         elif args[:1] == ["to-check-sum-address"]:
             output = args[1]
+        elif args[:1] == ["code"]:
+            output = self.contract_code.get(args[1].lower(), "0x")
+        elif args[:1] == ["calldata"]:
+            output = "0x70a08231" + "00" * 32
         elif args[:1] == ["block"]:
             output = json.dumps(
                 {
@@ -800,6 +805,9 @@ class AppCommandTests(unittest.TestCase):
 
     BSC_OPERATOR = "0x" + "bb" * 20
     BSC_CREDIT_CONTRACT = "0x" + "30" * 20
+    BSC_VALIDATORS = "getValidators(uint256,uint256)(address[],address[],uint256)"
+    MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
+    AGGREGATE3 = "aggregate3((address,bool,bytes)[])((bool,bytes)[])"
 
     def _monad_staking(self) -> dict[str, object]:
         return {
@@ -831,8 +839,10 @@ class AppCommandTests(unittest.TestCase):
             self.MONAD_DELEGATIONS: [True, 0, [11]],
         }
 
-    def _bsc_staking(self) -> dict[str, object]:
+    def _bsc_staking(self, shares: int = 10**18) -> dict[str, object]:
         return {
+            self.BSC_VALIDATORS: [[self.BSC_OPERATOR], [self.BSC_CREDIT_CONTRACT], "1"],
+            self.AGGREGATE3: [[[True, "0x" + format(shares, "064x")]]],
             self.BSC_ELECTION: [
                 ["0x" + "cc" * 20, "0x" + "dd" * 20],
                 ["1000000000000000000", "2000000000000000000"],
@@ -944,6 +954,43 @@ class AppCommandTests(unittest.TestCase):
         claim = self.runner.commands()[-1]
         self.assertIn("claim(address,uint256)", claim)
         self.assertIn(self.BSC_OPERATOR, claim)
+
+    def test_status_lists_delegations_on_staking_networks(self) -> None:
+        self.add_wallet()
+        # Ethereum has no staking backend, so `status` never reads delegations there.
+        self.assertNotIn("delegations", execute(["status"], self.app))
+
+        self.runner.staking = self._monad_staking()
+        monad_status = execute(["status"], self.make_app(profile="monad"))
+        self.assertEqual(monad_status["delegations"][0]["validator_id"], 11)
+        self.assertEqual(monad_status["delegations"][0]["stake"], "1")
+
+        self.runner.staking = self._bsc_staking()
+        self.runner.contract_code[self.MULTICALL3.lower()] = "0x6001"
+        bsc = self.make_app(profile="bsc")
+        bsc_status = execute(["status"], bsc)
+        delegation = bsc_status["delegations"][0]
+        self.assertEqual(delegation["operator"], self.BSC_OPERATOR)
+        self.assertEqual(delegation["shares"], str(10**18))
+        self.assertEqual(delegation["pooled_bnb"], "5")
+        self.assertEqual(delegation["commission"], "9.00")
+        self.assertTrue(any("aggregate3" in entry for entry in bsc.cast.trace))
+
+    def test_status_lists_delegations_without_multicall3(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._bsc_staking()
+        self.runner.staking["balanceOf(address)(uint256)"] = ["1000000000000000000"]
+        bsc = self.make_app(profile="bsc")
+        status = execute(["status"], bsc)
+        self.assertEqual(status["delegations"][0]["shares"], "1000000000000000000")
+        self.assertFalse(any("aggregate3" in entry for entry in bsc.cast.trace))
+
+    def test_status_hides_credit_contracts_with_no_shares(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._bsc_staking(shares=0)
+        self.runner.contract_code[self.MULTICALL3.lower()] = "0x6001"
+        bsc = self.make_app(profile="bsc")
+        self.assertEqual(execute(["status"], bsc)["delegations"], [])
 
     def test_stake_unknown_network_and_usage_errors(self) -> None:
         with self.assertRaisesRegex(WalletCliError, "not supported"):

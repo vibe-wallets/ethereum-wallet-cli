@@ -193,6 +193,19 @@ class CastClientTests(unittest.TestCase):
         self.assertNotIn("hidden", trace_output.getvalue())
         self.assertEqual(client.trace, [])
 
+    def test_trace_shortens_very_long_arguments(self) -> None:
+        def runner(command, **kwargs):
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        client = CastClient(self.directory, runner=runner)
+        client.run(["calldata", "aggregate3", "0x" + "ab" * 4000])
+        self.assertEqual(len(client.trace), 1)
+        self.assertIn("..7682-omitted..", client.trace[0])
+        self.assertLess(len(client.trace[0]), 400)
+
+        client.run(["chain-id"])
+        self.assertEqual(client.trace[1], "cast chain-id")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,7 @@ hidden keystore prompt.
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 from typing import TYPE_CHECKING, Any
@@ -24,6 +25,10 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 BSC_STAKE_HUB_ADDRESS = "0x0000000000000000000000000000000000002002"
 # Monad exposes staking through the 0x1000 precompile.
 MONAD_STAKING_ADDRESS = "0x0000000000000000000000000000000000001000"
+# Multicall3 is deployed at the same address on most EVM chains, including BSC.
+MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11"
+_AGGREGATE3 = "aggregate3((address,bool,bytes)[])((bool,bytes)[])"
+_BALANCE_OF = "balanceOf(address)(uint256)"
 
 MONAD_DUST_THRESHOLD_WEI = 1_000_000_000  # 1 gwei, per Monad staking API
 MONAD_COMMISSION_BASE = 10**18
@@ -60,6 +65,11 @@ def _as_list(value: Any, label: str) -> list[Any]:
     return value
 
 
+def _as_address(value: Any, label: str) -> str:
+    """Validate and checksum-normalize one address returned by Cast."""
+    return validate_address(str(value), label)
+
+
 def _percent(rate: int, base: int) -> str:
     """Render an integer rate scaled by ``base`` as a percentage with two decimals."""
     hundredths = rate * 10_000 // base
@@ -70,6 +80,63 @@ def _read(app: Application, chain: Chain, address: str, signature: str, *argumen
     """Call a read-only contract function and return the decoded JSON value."""
     output = app.cast.network(chain, ["call", address, signature, *arguments], json_output=True)
     return app._parse_json_result(output, "staking")
+
+
+def _encode_call(app: Application, signature: str, *arguments: str) -> str:
+    """ABI-encode calldata for one call; Cast does the encoding, not the CLI."""
+    return app.cast.run(["calldata", signature, *arguments])
+
+
+def _has_code(app: Application, chain: Chain, address: str) -> bool:
+    """Return whether an address has runtime code on the selected chain."""
+    output = app.cast.network(chain, ["code", address]).strip()
+    return output not in {"", "0x", "0x0"}
+
+
+def _decode_uint(data: str, label: str) -> int:
+    """Decode a single ABI-encoded 32-byte unsigned integer."""
+    text = data.strip()
+    if not re.fullmatch(r"0x[0-9a-fA-F]{1,64}", text):
+        raise FoundryError(f"Foundry returned an invalid {label} value.")
+    return int(text, 16)
+
+
+def _multicall(
+    app: Application, chain: Chain, calls: list[tuple[str, str]]
+) -> list[tuple[bool, str]]:
+    """Batch read-only calls with Multicall3 and return ``(success, data)`` pairs."""
+    inner = ",".join(f"({target},false,{data})" for target, data in calls)
+    output = app.cast.network(
+        chain, ["call", MULTICALL3_ADDRESS, _AGGREGATE3, f"[{inner}]"], json_output=True
+    )
+    # Cast reports one entry per returned value, so the Result[] below is the only one.
+    outputs = _as_list(app._parse_json_result(output, "multicall"), "multicall")
+    if len(outputs) != 1:
+        raise FoundryError("Foundry returned an invalid multicall value.")
+    pairs: list[tuple[bool, str]] = []
+    for item in _as_list(outputs[0], "multicall"):
+        entry = _as_list(item, "multicall result")
+        if len(entry) != 2:
+            raise FoundryError("Foundry returned an invalid multicall value.")
+        pairs.append((bool(entry[0]), str(entry[1])))
+    return pairs
+
+
+def _batch_balances(app: Application, chain: Chain, credits: list[str], holder: str) -> list[int]:
+    """Read ``balanceOf(holder)`` for many credit contracts, batching when possible."""
+    if _has_code(app, chain, MULTICALL3_ADDRESS):
+        data = _encode_call(app, _BALANCE_OF, holder)
+        pairs = _multicall(app, chain, [(credit, data) for credit in credits])
+        return [
+            _decode_uint(returned, "delegation shares") if success else 0
+            for success, returned in pairs
+        ]
+    # Fallback for local chains without Multicall3: one read per credit contract.
+    balances: list[int] = []
+    for credit in credits:
+        value = _as_list(_read(app, chain, credit, _BALANCE_OF, holder), "delegation shares")
+        balances.append(_as_int(value[0], "delegation shares"))
+    return balances
 
 
 def _pop_option(tokens: list[str], name: str) -> tuple[str | None, list[str]]:
@@ -241,6 +308,12 @@ class _StakingBackend:
             raise WalletCliError("Choose either --dry-run or --yes, not both.")
         return dry_run, yes, [t for t in tokens if t not in {"--dry-run", "--yes"}]
 
+    def delegations_summary(
+        self, app: Application, chain: Chain, address: str
+    ) -> list[dict[str, Any]]:
+        """Return the address's delegations for the top-level ``status`` command."""
+        return []
+
 
 class MonadStaking(_StakingBackend):
     """Monad staking precompile (0x1000): validator IDs and MON amounts."""
@@ -351,7 +424,7 @@ class MonadStaking(_StakingBackend):
         if tokens:
             delegations = [self._delegator(app, chain, self._validator_id(tokens[0]), address)]
         else:
-            delegations = self._delegations(app, chain, address)
+            delegations = self.delegations_summary(app, chain, address)
         return {
             "command": "stake status",
             "chain": app.network_label(chain),
@@ -363,6 +436,9 @@ class MonadStaking(_StakingBackend):
             "withdrawal_delay_epochs": 1,
             "delegations": delegations,
         }
+
+    def delegations_summary(self, app, chain, address) -> list[dict[str, Any]]:
+        return self._delegations(app, chain, address)
 
     def validators_command(self, app, state, chain, tokens) -> dict[str, Any]:
         limit, remaining = _limit_option(tokens, default=MONAD_DEFAULT_LIMIT, maximum=500)
@@ -561,7 +637,11 @@ class BscStaking(_StakingBackend):
     _MIN_SELF = "minSelfDelegationBNB()(uint256)"
     _MIN_CHANGE = "minDelegationBNBChange()(uint256)"
     _MAX_ELECTED = "maxElectedValidators()(uint256)"
+    _VALIDATORS = "getValidators(uint256,uint256)(address[],address[],uint256)"
     _ELECTION = "getValidatorElectionInfo(uint256,uint256)(address[],uint256[],bytes[],uint256)"
+    _POOLED = "getPooledBNB(address)(uint256)"
+    _PENDING_UNBOND = "pendingUnbondRequest(address)(uint256)"
+    _CLAIMABLE_UNBOND = "claimableUnbondRequest(address)(uint256)"
     _CONSENSUS_TO_OPERATOR = "consensusToOperator(address)(address)"
     _COMMISSION = "getValidatorCommission(address)((uint64,uint64,uint64))"
     _DESCRIPTION = "getValidatorDescription(address)((string,string,string,string))"
@@ -595,6 +675,56 @@ class BscStaking(_StakingBackend):
     def _credit_contract(self, app: Application, chain: Chain, operator: str) -> str:
         data = _as_list(_read(app, chain, self.address, self._CREDIT, operator), "credit contract")
         return validate_address(str(data[0]), "credit contract")
+
+    def _validator_credits(self, app: Application, chain: Chain) -> list[tuple[str, str]]:
+        """Return every ``(operator, credit contract)`` pair in the validator set."""
+        data = _as_list(_read(app, chain, self.address, self._VALIDATORS, "0", "0"), "validators")
+        operators = [
+            _as_address(item, "operator address") for item in _as_list(data[0], "operators")
+        ]
+        credits = [_as_address(item, "credit contract") for item in _as_list(data[1], "credits")]
+        return list(zip(operators, credits))
+
+    def _delegation(
+        self,
+        app: Application,
+        chain: Chain,
+        operator: str,
+        address: str,
+        *,
+        credit: str | None = None,
+        shares: int | None = None,
+    ) -> dict[str, Any]:
+        """Describe one delegator/validator position from the StakeCredit contract."""
+        if credit is None:
+            credit = self._credit_contract(app, chain, operator)
+        if shares is None:
+            shares = _as_int(
+                _as_list(_read(app, chain, credit, _BALANCE_OF, address), "shares")[0],
+                "shares",
+            )
+        pooled = _as_int(
+            _as_list(_read(app, chain, credit, self._POOLED, address), "balance")[0], "balance"
+        )
+        rate = self._commission_rate(app, chain, operator)
+        return {
+            "operator": operator,
+            "credit_contract": credit,
+            "shares": str(shares),
+            "pooled_bnb_wei": pooled,
+            "pooled_bnb": format_units(pooled, 18),
+            "commission": _percent(rate, BSC_COMMISSION_BASE),
+            "pending_unbond_requests": _as_int(
+                _as_list(_read(app, chain, credit, self._PENDING_UNBOND, address), "pending")[0],
+                "pending unbond requests",
+            ),
+            "claimable_unbond_requests": _as_int(
+                _as_list(_read(app, chain, credit, self._CLAIMABLE_UNBOND, address), "claimable")[
+                    0
+                ],
+                "claimable unbond requests",
+            ),
+        }
 
     def _parameters(self, app: Application, chain: Chain) -> dict[str, Any]:
         unbond = _as_int(
@@ -645,60 +775,64 @@ class BscStaking(_StakingBackend):
                 "delegation": None,
             }
         operator = validate_address(tokens[0], "operator address")
-        credit = self._credit_contract(app, chain, operator)
-        shares = _as_int(
-            _as_list(_read(app, chain, credit, "balanceOf(address)(uint256)", address), "shares")[
-                0
-            ],
-            "shares",
-        )
-        pooled = _as_int(
-            _as_list(
-                _read(app, chain, credit, "getPooledBNB(address)(uint256)", address), "balance"
-            )[0],
-            "balance",
-        )
-        rate = self._commission_rate(app, chain, operator)
         return {
             "command": "stake status",
             "chain": app.network_label(chain),
             "chain_id": chain.chain_id,
             "address": address,
             "parameters": parameters,
-            "delegation": {
-                "operator": operator,
-                "credit_contract": credit,
-                "shares": str(shares),
-                "pooled_bnb_wei": pooled,
-                "pooled_bnb": format_units(pooled, 18),
-                "commission": _percent(rate, BSC_COMMISSION_BASE),
-                "pending_unbond_requests": _as_int(
-                    _as_list(
-                        _read(
-                            app,
-                            chain,
-                            credit,
-                            "pendingUnbondRequest(address)(uint256)",
-                            address,
-                        ),
-                        "pending unbond requests",
-                    )[0],
-                    "pending unbond requests",
-                ),
-                "claimable_unbond_requests": _as_int(
-                    _as_list(
-                        _read(
-                            app,
-                            chain,
-                            credit,
-                            "claimableUnbondRequest(address)(uint256)",
-                            address,
-                        ),
-                        "claimable unbond requests",
-                    )[0],
-                    "claimable unbond requests",
-                ),
-            },
+            "delegation": self._delegation(app, chain, operator, address),
+        }
+
+    def delegations_summary(self, app, chain, address) -> list[dict[str, Any]]:
+        """Find the address's delegations across the validator set's credit contracts."""
+        pairs = self._validator_credits(app, chain)
+        balances = _batch_balances(app, chain, [credit for _, credit in pairs], address)
+        return [
+            self._delegation(app, chain, operator, address, credit=credit, shares=shares)
+            for (operator, credit), shares in zip(pairs, balances)
+            if shares > 0
+        ]
+
+    def _delegation(
+        self,
+        app: Application,
+        chain: Chain,
+        operator: str,
+        address: str,
+        *,
+        credit: str | None = None,
+        shares: int | None = None,
+    ) -> dict[str, Any]:
+        """Describe one delegator/validator position from the StakeCredit contract."""
+        if credit is None:
+            credit = self._credit_contract(app, chain, operator)
+        if shares is None:
+            shares = _as_int(
+                _as_list(_read(app, chain, credit, _BALANCE_OF, address), "shares")[0],
+                "shares",
+            )
+        pooled = _as_int(
+            _as_list(_read(app, chain, credit, self._POOLED, address), "balance")[0], "balance"
+        )
+        rate = self._commission_rate(app, chain, operator)
+        return {
+            "operator": operator,
+            "credit_contract": credit,
+            "shares": str(shares),
+            "pooled_bnb_wei": pooled,
+            "pooled_bnb": format_units(pooled, 18),
+            "commission": _percent(rate, BSC_COMMISSION_BASE),
+            "pending_unbond_requests": _as_int(
+                _as_list(_read(app, chain, credit, self._PENDING_UNBOND, address), "pending")[0],
+                "pending unbond requests",
+            ),
+            "claimable_unbond_requests": _as_int(
+                _as_list(_read(app, chain, credit, self._CLAIMABLE_UNBOND, address), "claimable")[
+                    0
+                ],
+                "claimable unbond requests",
+            ),
         }
 
     def validators_command(self, app, state, chain, tokens) -> dict[str, Any]:
@@ -885,6 +1019,14 @@ for _backend in (MonadStaking(), BscStaking()):
 def staking_supported(chain_name: str) -> bool:
     """Return whether a chain has a staking backend in this build."""
     return chain_name in _BACKENDS
+
+
+def status_delegations(app: Application, chain: Chain, address: str) -> list[dict[str, Any]] | None:
+    """Return an address's staking delegations, or ``None`` when staking is unsupported."""
+    backend = _BACKENDS.get(chain.name)
+    if backend is None:
+        return None
+    return backend.delegations_summary(app, chain, address)
 
 
 def handle_stake(app: Application, tokens: list[str]) -> dict[str, Any]:
