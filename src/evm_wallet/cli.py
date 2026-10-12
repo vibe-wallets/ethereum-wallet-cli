@@ -26,6 +26,7 @@ from .human import (
     shorten_address,
     style_help,
     table,
+    whole_amount,
 )
 
 try:  # GNU readline is optional; the shell still works without line editing.
@@ -556,10 +557,15 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
                 row: list[object] = [
                     str(item["validator_id"]),
                     str(item["status"]),
-                    str(item["stake"]),
+                    whole_amount(item["stake"]),
                 ]
                 if full:
-                    row.extend([str(item["consensus_stake"]), str(item["snapshot_stake"])])
+                    row.extend(
+                        [
+                            whole_amount(item["consensus_stake"]),
+                            whole_amount(item["snapshot_stake"]),
+                        ]
+                    )
                 row.extend([f"{item['commission']}%", auth if full else shorten_address(auth)])
                 rows.append(row)
             columns = ["ID", "STATUS", "STAKE (MON)"]
@@ -569,7 +575,12 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             print(table(rows, columns, stream=output), file=output)
         else:
             rows = [
-                [item["operator"], item["consensus"], item["stake"], f"{item['commission']}%"]
+                [
+                    item["operator"],
+                    item["consensus"],
+                    whole_amount(item["stake"]),
+                    f"{item['commission']}%",
+                ]
                 for item in validators
             ]
             print(

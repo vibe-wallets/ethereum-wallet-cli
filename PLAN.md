@@ -125,7 +125,7 @@ Staking on Monad and BNB Smart Chain
   plus `--chain-id 143`, which keeps the reported chain ID while freeing the
   address. Both profiles then perform a real signed delegation, verify the mock
   state, and check that plain `status` reports the resulting delegation.
-- Validation: 127 offline tests, plus the Docker E2E covering staking reads,
+- Validation: 128 offline tests, plus the Docker E2E covering staking reads,
   `status` delegations, dry-runs, a real signed write, and mock-state verification
   on Monad and BSC.
 

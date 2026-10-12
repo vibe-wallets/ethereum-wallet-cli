@@ -89,6 +89,24 @@ def shorten_address(value: str, *, leading: int = 6, trailing: int = 4) -> str:
     return f"{value[:leading]}…{value[-trailing:]}"
 
 
+def whole_amount(value: object) -> str:
+    """Round a decimal amount down to a whole number, for compact tables.
+
+    Stake columns list large amounts whose full precision is unreadable in a
+    table, so they show whole coins and ``--json`` carries the exact value. A
+    small but non-zero amount is shown as ``<1`` rather than ``0`` so it is not
+    mistaken for an empty one.
+    """
+    whole, _, fraction = str(value).strip().partition(".")
+    negative = whole.startswith("-")
+    digits = whole[1:] if negative else whole
+    if digits in {"", "0"} and fraction.strip("0"):
+        return "-<1" if negative else "<1"
+    if not digits:
+        return "0"
+    return "0" if digits == "0" else whole
+
+
 def section_title(value: str, *, enabled: bool | None = None, stream: TextIO | None = None) -> str:
     """Render a visually distinct section title."""
     return color(value, "heading", enabled=enabled, stream=stream)

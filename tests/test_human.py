@@ -25,6 +25,7 @@ from evm_wallet.human import (
     shorten_address,
     style_help,
     table,
+    whole_amount,
 )
 
 
@@ -56,6 +57,13 @@ class LayoutTests(unittest.TestCase):
     def test_display_width_ignores_ansi_and_counts_wide_glyphs(self):
         self.assertEqual(display_width("\x1b[1mabc\x1b[0m"), 3)
         self.assertEqual(display_width("钱包"), 4)
+
+    def test_whole_amount_truncates_but_keeps_small_values_visible(self):
+        self.assertEqual(whole_amount("2211253192.593614836340904018"), "2211253192")
+        self.assertEqual(whole_amount("1000"), "1000")
+        self.assertEqual(whole_amount("0"), "0")
+        self.assertEqual(whole_amount("0.000000000000000001"), "<1")
+        self.assertEqual(whole_amount("12.0"), "12")
 
     def test_shorten_address_keeps_the_edges(self):
         address = "0x" + "11" * 20
@@ -341,6 +349,9 @@ class ClearAndRenderTests(unittest.TestCase):
         self.assertIn("196 active", validators.getvalue())
         self.assertIn("STATUS", validators.getvalue())
         self.assertIn("15.00%", validators.getvalue())
+        # Stake columns show whole MON; --json keeps the exact value.
+        self.assertIn("218620885", validators.getvalue())
+        self.assertNotIn("218620885.432720435926133658", validators.getvalue())
         self.assertIn(shorten_address("0x" + "bb" * 20), validators.getvalue())
         self.assertNotIn("SNAPSHOT (MON)", validators.getvalue())
 
