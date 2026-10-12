@@ -9,6 +9,8 @@ the plain text.
 
 from __future__ import annotations
 
+from string import Template
+
 HELP_INDEX = """COMMANDS
 
 WALLETS
@@ -38,14 +40,7 @@ TRANSFERS
   token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
 
 STAKING (Monad and BNB Smart Chain)
-  stake validators [--limit N]     List active validators, highest stake first
-  stake status [TARGET]            Show the epoch and your delegations
-  stake info TARGET                Show one validator's details
-  stake delegate TARGET AMOUNT [--dry-run | --yes]
-  stake undelegate TARGET AMOUNT [--dry-run | --yes]
-  stake claim TARGET [--dry-run | --yes]
-  stake withdraw VALIDATOR_ID WITHDRAW_ID   (Monad)
-  stake compound VALIDATOR_ID               (Monad)
+$staking
 
 INSPECTION
   tx inspect HASH                  Show a transaction and its receipt
@@ -208,21 +203,21 @@ stake validators [--limit N] [--all] [--full]
   withdrawn, double-sign) and the auth address. --full adds the consensus and
   next-epoch snapshot stakes and prints unshortened addresses. Read one validator
   per row, so a large --limit is slow.
-stake status [TARGET]
+stake status [$target]
   Show the current epoch and your delegations. On BNB Smart Chain, pass an
   operator address to see that validator's pool and your share balance.
-stake info TARGET [--delegators]
+stake info $target [--delegators]
   Show one validator's full details: status, execution, consensus and snapshot
   stake and commission, the unclaimed reward pool, and the consensus keys.
   --delegators pages through getDelegators for an exact delegator count, which
   can take a while for a large validator.
-stake delegate TARGET AMOUNT
+stake delegate $target AMOUNT
   Add stake. Monad amounts are MON; BNB Smart Chain amounts are BNB.
-stake undelegate TARGET AMOUNT
+stake undelegate $target AMOUNT
   Start removing stake. On Monad you later call `stake withdraw`; on BNB Smart
   Chain the amount is converted to validator shares and becomes claimable after
   the unbonding period.
-stake claim TARGET [REQUEST_NUMBER]
+stake claim $target [REQUEST_NUMBER]
   Claim accumulated rewards (Monad), or claim unbonded BNB (BNB Smart Chain).
 stake withdraw VALIDATOR_ID WITHDRAW_ID   (Monad only)
   Reclaim an undelegated amount after the withdrawal delay.
@@ -332,22 +327,63 @@ _NEEDS_VERBOSE = (
     "`--verbose` to see its help."
 )
 
+# Command index rows for staking. The stake target placeholder is filled per chain,
+# so the same rows render as VALIDATOR_ID on Monad and OPERATOR on BNB Smart Chain.
+_STAKING_INDEX: tuple[tuple[str, str], ...] = (
+    ("stake validators [--limit N]", "List active validators, highest stake first"),
+    ("stake status [$target]", "Show the epoch and your delegations"),
+    ("stake info $target", "Show one validator's details"),
+    ("stake delegate $target AMOUNT [--dry-run | --yes]", ""),
+    ("stake undelegate $target AMOUNT [--dry-run | --yes]", ""),
+    ("stake claim $target [--dry-run | --yes]", ""),
+    ("stake withdraw VALIDATOR_ID WITHDRAW_ID", "(Monad)"),
+    ("stake compound VALIDATOR_ID", "(Monad)"),
+)
 
-def help_text(topic: str | None = None, *, verbose: bool = False) -> str:
+
+def _staking_index(target: str) -> str:
+    """Render the command index's staking rows for a chain's stake target.
+
+    The rows are built here rather than written into the index literal because
+    the stake target is a validator ID on Monad and an operator address on BNB
+    Smart Chain, so the commands have different widths on each chain and the
+    descriptions must stay aligned.
+    """
+    lines = []
+    for usage, description in _STAKING_INDEX:
+        command = f"  {Template(usage).substitute(target=target)}"
+        if not description:
+            lines.append(command)
+            continue
+        pad = " " * max(1, 35 - len(command))
+        lines.append(f"{command}{pad}{description}")
+    return "\n".join(lines)
+
+
+def _fill_help(text: str, target: str) -> str:
+    """Fill a chain's stake target name into a help page."""
+    return Template(text).substitute(target=target, staking=_staking_index(target))
+
+
+def help_text(topic: str | None = None, *, verbose: bool = False, target: str = "VALIDATOR") -> str:
     """Return the command index or one focused help topic.
 
     Advanced commands are only listed, and advanced-only topics only explained,
-    when ``verbose`` is true.
+    when ``verbose`` is true. ``target`` names the stake argument for the active
+    chain, which is a validator ID on Monad and an operator address elsewhere.
     """
     if topic is None:
-        return HELP_INDEX + (ADVANCED_INDEX if verbose else "")
+        index = _fill_help(HELP_INDEX, target)
+        return index + (_fill_help(ADVANCED_INDEX, target) if verbose else "")
     normalized = topic.strip().lower()
     if normalized in ADVANCED_TOPICS:
-        return ADVANCED_TOPICS[normalized] if verbose else _NEEDS_VERBOSE.format(topic=topic)
+        if not verbose:
+            return _NEEDS_VERBOSE.format(topic=topic)
+        return _fill_help(ADVANCED_TOPICS[normalized], target)
     if normalized in HELP_TOPICS:
-        text = HELP_TOPICS[normalized]
+        text = _fill_help(HELP_TOPICS[normalized], target)
         if verbose:
-            text += ADVANCED_EXTRA.get(normalized, "")
+            text += _fill_help(ADVANCED_EXTRA.get(normalized, ""), target)
         return text
     return _NO_TOPIC.format(topic=topic)
 

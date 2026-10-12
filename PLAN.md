@@ -115,6 +115,11 @@ Staking on Monad and BNB Smart Chain
   stakes. `stake info` gained the same status plus an opt-in `--delegators` count
   that pages `getDelegators`. Network-wide totals, APR, and validator names are
   indexer data and are deliberately not invented.
+- Staking commands name their validator argument per chain, since each launcher
+  serves one chain: `VALIDATOR_ID` on Monad and `OPERATOR` on BNB Smart Chain.
+  The command index, the `stake` help topic, and every usage error render from
+  that one label instead of a neutral `TARGET` placeholder, which read as a
+  mismatch next to the Monad-only `withdraw` and `compound` commands.
 - Trace readability: a single argument longer than 320 characters (a Multicall3
   batch payload, for example) is shortened to a head and tail with `..N-omitted..`
   in the middle, so every invocation is still named without a multi-kilobyte line.

@@ -24,7 +24,7 @@ from .config import ConfigStore, validate_alias, validate_contact_name, validate
 from .errors import ConfigurationError, FoundryError, WalletCliError
 from .foundry import CastClient, parse_integer_output, unwrap_cast_json
 from .help import help_text
-from .staking import handle_stake, status_delegations
+from .staking import handle_stake, status_delegations, target_label_for
 from .txlog import TXLOG_LIMIT, append_transaction, read_transactions
 
 KEYSTORE_ADDRESS_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -536,7 +536,7 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
             "command": "help",
             "topic": topic,
             "verbose": verbose,
-            "text": help_text(topic, verbose=verbose),
+            "text": help_text(topic, verbose=verbose, target=target_label_for(app.startup_chain)),
         }
     if tokens[0] == "clear":
         if len(tokens) != 1:

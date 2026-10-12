@@ -527,6 +527,37 @@ class AppCommandTests(unittest.TestCase):
         with self.assertRaisesRegex(WalletCliError, "Usage: help"):
             execute(["help", "wallet", "extra"], self.app)
 
+    def test_help_names_the_stake_target_of_the_active_chain(self) -> None:
+        monad = self.make_app(profile="monad")
+        index = execute(["help"], monad)["text"]
+        self.assertIn("stake info VALIDATOR_ID", index)
+        self.assertNotIn("TARGET", index)
+        topic = execute(["help", "stake"], monad)["text"]
+        self.assertIn("stake status [VALIDATOR_ID]", topic)
+        self.assertIn("stake withdraw VALIDATOR_ID WITHDRAW_ID", topic)
+
+        bsc = self.make_app(profile="bsc")
+        self.assertIn("stake info OPERATOR", execute(["help"], bsc)["text"])
+        self.assertIn("stake claim OPERATOR", execute(["help", "stake"], bsc)["text"])
+
+        # A chain without staking gets the neutral name rather than a wrong one.
+        self.assertIn("stake info VALIDATOR", execute(["help"], self.app)["text"])
+
+    def test_stake_usage_errors_name_the_stake_target_of_the_chain(self) -> None:
+        monad = self.make_app(profile="monad")
+        with self.assertRaisesRegex(WalletCliError, r"Usage: stake status \[VALIDATOR_ID\]"):
+            execute(["stake"], monad)
+        with self.assertRaisesRegex(WalletCliError, r"Usage: stake info VALIDATOR_ID"):
+            execute(["stake", "info", "11", "22"], monad)
+        with self.assertRaisesRegex(WalletCliError, r"Usage: stake delegate VALIDATOR_ID"):
+            execute(["stake", "delegate", "11"], monad)
+
+        bsc = self.make_app(profile="bsc")
+        with self.assertRaisesRegex(WalletCliError, r"Usage: stake info OPERATOR\."):
+            execute(["stake", "info", "11", "22"], bsc)
+        with self.assertRaisesRegex(WalletCliError, r"Usage: stake claim OPERATOR"):
+            execute(["stake", "claim"], bsc)
+
     def test_transaction_inspect_handles_pending_rpc_receipt(self) -> None:
         result = execute(["tx", "inspect", TX_HASH], self.app)
         self.assertTrue(result["pending"])

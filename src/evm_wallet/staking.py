@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import sys
 import time
+from string import Template
 from typing import TYPE_CHECKING, Any
 
 from .amounts import format_units, to_base_units, validate_address
@@ -45,11 +46,13 @@ MONAD_VALIDATOR_FLAGS = (
 )
 MONAD_KNOWN_FLAGS = sum(bit for bit, _ in MONAD_VALIDATOR_FLAGS)
 
-STAKING_USAGE = (
-    "Usage: stake status [TARGET] | stake validators [--limit N] [--all] [--full] | "
-    "stake info TARGET [--delegators] | "
-    "stake delegate TARGET AMOUNT [--dry-run | --yes] | stake undelegate TARGET AMOUNT "
-    "[--dry-run | --yes] | stake claim TARGET [--dry-run | --yes]. Monad also accepts "
+# The stake target is a validator ID on Monad and an operator address on BNB Smart
+# Chain, so usage lines and help name it per chain through $target.
+STAKING_USAGE = Template(
+    "Usage: stake status [$target] | stake validators [--limit N] [--all] [--full] | "
+    "stake info $target [--delegators] | "
+    "stake delegate $target AMOUNT [--dry-run | --yes] | stake undelegate $target AMOUNT "
+    "[--dry-run | --yes] | stake claim $target [--dry-run | --yes]. Monad also accepts "
     "stake withdraw VALIDATOR_ID WITHDRAW_ID and stake compound VALIDATOR_ID."
 )
 
@@ -268,8 +271,13 @@ class _StakingBackend:
     """Shared dispatch for a chain's staking command surface."""
 
     chain_names: tuple[str, ...] = ()
-    target_label = "target"
+    # User-facing name of the stake target, filled into usage lines and help.
+    target_label = "VALIDATOR"
     address = ""
+
+    def usage(self) -> str:
+        """Return this chain's stake usage line, naming its own stake target."""
+        return STAKING_USAGE.substitute(target=self.target_label)
 
     def dispatch(
         self, app: Application, state: dict[str, Any], chain: Chain, action: str, tokens: list[str]
@@ -284,38 +292,38 @@ class _StakingBackend:
         }
         handler = handlers.get(action)
         if handler is None:
-            raise WalletCliError(STAKING_USAGE)
+            raise WalletCliError(self.usage())
         return handler(app, state, chain, tokens)
 
     def status_command(
         self, app: Application, state: dict[str, Any], chain: Chain, tokens: list[str]
     ) -> dict[str, Any]:
-        raise WalletCliError(STAKING_USAGE)
+        raise WalletCliError(self.usage())
 
     def validators_command(
         self, app: Application, state: dict[str, Any], chain: Chain, tokens: list[str]
     ) -> dict[str, Any]:
-        raise WalletCliError(STAKING_USAGE)
+        raise WalletCliError(self.usage())
 
     def info_command(
         self, app: Application, state: dict[str, Any], chain: Chain, tokens: list[str]
     ) -> dict[str, Any]:
-        raise WalletCliError(STAKING_USAGE)
+        raise WalletCliError(self.usage())
 
     def delegate_command(
         self, app: Application, state: dict[str, Any], chain: Chain, tokens: list[str]
     ) -> dict[str, Any]:
-        raise WalletCliError(STAKING_USAGE)
+        raise WalletCliError(self.usage())
 
     def undelegate_command(
         self, app: Application, state: dict[str, Any], chain: Chain, tokens: list[str]
     ) -> dict[str, Any]:
-        raise WalletCliError(STAKING_USAGE)
+        raise WalletCliError(self.usage())
 
     def claim_command(
         self, app: Application, state: dict[str, Any], chain: Chain, tokens: list[str]
     ) -> dict[str, Any]:
-        raise WalletCliError(STAKING_USAGE)
+        raise WalletCliError(self.usage())
 
     @staticmethod
     def _amount_arguments(tokens: list[str]) -> tuple[bool, bool, list[str]]:
@@ -336,7 +344,7 @@ class MonadStaking(_StakingBackend):
     """Monad staking precompile (0x1000): validator IDs and MON amounts."""
 
     chain_names = ("monad", "monad-testnet")
-    target_label = "validator_id"
+    target_label = "VALIDATOR_ID"
     address = MONAD_STAKING_ADDRESS
 
     _EPOCH = "getEpoch()(uint64,bool)"
@@ -459,7 +467,7 @@ class MonadStaking(_StakingBackend):
 
     def status_command(self, app, state, chain, tokens) -> dict[str, Any]:
         if len(tokens) > 1:
-            raise WalletCliError("Usage: stake status [VALIDATOR_ID].")
+            raise WalletCliError(f"Usage: stake status [{self.target_label}].")
         epoch, in_delay = self._epoch(app, chain)
         _, metadata, _ = app.wallet(state=state)
         address = metadata["address"]
@@ -488,7 +496,7 @@ class MonadStaking(_StakingBackend):
         include_full = "--full" in remaining
         remaining = [token for token in remaining if token not in {"--all", "--full"}]
         if remaining:
-            raise WalletCliError(STAKING_USAGE)
+            raise WalletCliError(self.usage())
         epoch, in_delay = self._epoch(app, chain)
         active_ids = self._paginated_ids(app, chain, self._CONSENSUS, "consensus validator set")
         active_set = set(active_ids)
@@ -526,7 +534,7 @@ class MonadStaking(_StakingBackend):
         include_delegators = "--delegators" in tokens
         args = [token for token in tokens if token != "--delegators"]
         if len(args) != 1:
-            raise WalletCliError("Usage: stake info VALIDATOR_ID [--delegators].")
+            raise WalletCliError(f"Usage: stake info {self.target_label} [--delegators].")
         validator_id = self._validator_id(args[0])
         info = self._validator(app, chain, validator_id)
         active_ids = self._paginated_ids(app, chain, self._CONSENSUS, "consensus validator set")
@@ -546,7 +554,9 @@ class MonadStaking(_StakingBackend):
     def delegate_command(self, app, state, chain, tokens) -> dict[str, Any]:
         dry_run, yes, args = self._amount_arguments(tokens)
         if len(args) != 2:
-            raise WalletCliError("Usage: stake delegate VALIDATOR_ID AMOUNT [--dry-run | --yes].")
+            raise WalletCliError(
+                f"Usage: stake delegate {self.target_label} AMOUNT [--dry-run | --yes]."
+            )
         validator_id = self._validator_id(args[0])
         raw = to_base_units(args[1], 18)
         if raw < MONAD_DUST_THRESHOLD_WEI:
@@ -573,7 +583,8 @@ class MonadStaking(_StakingBackend):
         withdraw_raw, args = _pop_option(args, "--withdraw-id")
         if len(args) != 2:
             raise WalletCliError(
-                "Usage: stake undelegate VALIDATOR_ID AMOUNT [--withdraw-id N] [--dry-run | --yes]."
+                f"Usage: stake undelegate {self.target_label} AMOUNT [--withdraw-id N] "
+                "[--dry-run | --yes]."
             )
         validator_id = self._validator_id(args[0])
         raw = to_base_units(args[1], 18)
@@ -614,7 +625,7 @@ class MonadStaking(_StakingBackend):
     def claim_command(self, app, state, chain, tokens) -> dict[str, Any]:
         dry_run, yes, args = self._amount_arguments(tokens)
         if len(args) != 1:
-            raise WalletCliError("Usage: stake claim VALIDATOR_ID [--dry-run | --yes].")
+            raise WalletCliError(f"Usage: stake claim {self.target_label} [--dry-run | --yes].")
         validator_id = self._validator_id(args[0])
         return _run_transaction(
             app,
@@ -636,7 +647,7 @@ class MonadStaking(_StakingBackend):
         dry_run, yes, args = self._amount_arguments(tokens)
         if len(args) != 2:
             raise WalletCliError(
-                "Usage: stake withdraw VALIDATOR_ID WITHDRAW_ID [--dry-run | --yes]."
+                f"Usage: stake withdraw {self.target_label} WITHDRAW_ID [--dry-run | --yes]."
             )
         validator_id = self._validator_id(args[0])
         try:
@@ -664,7 +675,7 @@ class MonadStaking(_StakingBackend):
     def compound_command(self, app, state, chain, tokens) -> dict[str, Any]:
         dry_run, yes, args = self._amount_arguments(tokens)
         if len(args) != 1:
-            raise WalletCliError("Usage: stake compound VALIDATOR_ID [--dry-run | --yes].")
+            raise WalletCliError(f"Usage: stake compound {self.target_label} [--dry-run | --yes].")
         validator_id = self._validator_id(args[0])
         return _run_transaction(
             app,
@@ -694,7 +705,7 @@ class BscStaking(_StakingBackend):
     """BNB Smart Chain StakeHub (0x2002): operator addresses and share tokens."""
 
     chain_names = ("bsc", "bsc-testnet")
-    target_label = "operator"
+    target_label = "OPERATOR"
     address = BSC_STAKE_HUB_ADDRESS
 
     _UNBOND = "unbondPeriod()(uint256)"
@@ -825,7 +836,7 @@ class BscStaking(_StakingBackend):
 
     def status_command(self, app, state, chain, tokens) -> dict[str, Any]:
         if len(tokens) > 1:
-            raise WalletCliError("Usage: stake status [OPERATOR].")
+            raise WalletCliError(f"Usage: stake status [{self.target_label}].")
         _, metadata, _ = app.wallet(state=state)
         address = metadata["address"]
         parameters = self._parameters(app, chain)
@@ -902,7 +913,7 @@ class BscStaking(_StakingBackend):
     def validators_command(self, app, state, chain, tokens) -> dict[str, Any]:
         limit, remaining = _limit_option(tokens, default=BSC_DEFAULT_LIMIT, maximum=BSC_MAX_LIMIT)
         if remaining:
-            raise WalletCliError(STAKING_USAGE)
+            raise WalletCliError(self.usage())
         data = _as_list(
             _read(app, chain, self.address, self._ELECTION, "0", str(limit)), "election"
         )
@@ -936,7 +947,7 @@ class BscStaking(_StakingBackend):
 
     def info_command(self, app, state, chain, tokens) -> dict[str, Any]:
         if len(tokens) != 1:
-            raise WalletCliError("Usage: stake info OPERATOR_ADDRESS.")
+            raise WalletCliError(f"Usage: stake info {self.target_label}.")
         operator = validate_address(tokens[0], "operator address")
         credit = self._credit_contract(app, chain, operator)
         total_pooled = _as_int(
@@ -964,7 +975,7 @@ class BscStaking(_StakingBackend):
         args = [token for token in args if token != "--no-vote-power"]
         if len(args) != 2:
             raise WalletCliError(
-                "Usage: stake delegate OPERATOR_ADDRESS AMOUNT [--no-vote-power] "
+                f"Usage: stake delegate {self.target_label} AMOUNT [--no-vote-power] "
                 "[--dry-run | --yes]."
             )
         operator = validate_address(args[0], "operator address")
@@ -1000,7 +1011,7 @@ class BscStaking(_StakingBackend):
         args = [token for token in args if token != "--shares"]
         if len(args) != 2:
             raise WalletCliError(
-                "Usage: stake undelegate OPERATOR_ADDRESS AMOUNT [--shares] [--dry-run | --yes]."
+                f"Usage: stake undelegate {self.target_label} AMOUNT [--shares] [--dry-run | --yes]."
             )
         operator = validate_address(args[0], "operator address")
         if shares_only:
@@ -1046,7 +1057,7 @@ class BscStaking(_StakingBackend):
         dry_run, yes, args = self._amount_arguments(tokens)
         if len(args) not in {1, 2}:
             raise WalletCliError(
-                "Usage: stake claim OPERATOR_ADDRESS [REQUEST_NUMBER] [--dry-run | --yes]."
+                f"Usage: stake claim {self.target_label} [REQUEST_NUMBER] [--dry-run | --yes]."
             )
         operator = validate_address(args[0], "operator address")
         request_number = 0
@@ -1094,10 +1105,14 @@ def status_delegations(app: Application, chain: Chain, address: str) -> list[dic
     return backend.delegations_summary(app, chain, address)
 
 
+def target_label_for(chain_name: str) -> str:
+    """Return the user-facing name of a chain's stake target, for help text."""
+    backend = _BACKENDS.get(chain_name)
+    return backend.target_label if backend else _StakingBackend.target_label
+
+
 def handle_stake(app: Application, tokens: list[str]) -> dict[str, Any]:
     """Dispatch a ``stake ...`` command to the backend for the active chain."""
-    if len(tokens) < 2:
-        raise WalletCliError(STAKING_USAGE)
     state = app.config()
     chain = app.active_chain(state)
     backend = _BACKENDS.get(chain.name)
@@ -1106,4 +1121,6 @@ def handle_stake(app: Application, tokens: list[str]) -> dict[str, Any]:
             f"Staking is not supported on {app.network_label(chain)}. "
             "It is available on Monad and BNB Smart Chain networks."
         )
+    if len(tokens) < 2:
+        raise WalletCliError(backend.usage())
     return backend.dispatch(app, state, chain, tokens[1], tokens[2:])

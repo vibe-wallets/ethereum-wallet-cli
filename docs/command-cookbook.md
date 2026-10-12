@@ -123,6 +123,8 @@ A transaction can be pending, replaced, dropped, or reverted. A submitted hash i
 
 ## Stake on Monad
 
+Staking commands take one validator argument, and what that argument is depends on the chain: a numeric validator ID on Monad, an operator address on BNB Smart Chain. Each launcher's `help` names it for its own chain (`VALIDATOR_ID` or `OPERATOR`), and usage errors use the same name.
+
 On Monad, validators are identified by a numeric ID and stake is denominated in MON:
 
 ```text

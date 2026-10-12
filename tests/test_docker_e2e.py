@@ -533,6 +533,12 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             self.assertIn("WALLET COMMANDS", topic_output)
             self.assertIn("No external command ran", topic_output)
 
+            # Help names the stake target of this launcher's own chain.
+            stake_help = shell.command("help stake")
+            expected_target = {"monad": "VALIDATOR_ID", "bsc": "OPERATOR"}.get(profile, "VALIDATOR")
+            self.assertIn(f"stake info {expected_target}", stake_help)
+            self.assertNotIn("TARGET", stake_help)
+
             # Tab completion runs through GNU readline inside the real launcher.
             completed = shell.command("chain lis\t")
             self.assertIn("NETWORKS", completed)
