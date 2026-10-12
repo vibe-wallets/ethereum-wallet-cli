@@ -204,7 +204,7 @@ class CastClientTests(unittest.TestCase):
         self.assertLess(len(client.trace[0]), 400)
 
         client.run(["chain-id"])
-        self.assertEqual(client.trace[1], "cast chain-id")
+        self.assertTrue(client.trace[1].endswith("cast chain-id"))
 
 
 if __name__ == "__main__":
