@@ -37,6 +37,16 @@ TRANSFERS
   send DESTINATION AMOUNT [--dry-run | --yes]
   token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
 
+STAKING (Monad and BNB Smart Chain)
+  stake validators [--limit N]     List validators with stake and commission
+  stake status [TARGET]            Show the epoch and your delegations
+  stake info TARGET                Show one validator's details
+  stake delegate TARGET AMOUNT [--dry-run | --yes]
+  stake undelegate TARGET AMOUNT [--dry-run | --yes]
+  stake claim TARGET [--dry-run | --yes]
+  stake withdraw VALIDATOR_ID WITHDRAW_ID   (Monad)
+  stake compound VALIDATOR_ID               (Monad)
+
 INSPECTION
   tx inspect HASH                  Show a transaction and its receipt
   history [COUNT]                  Show recent shell commands
@@ -48,7 +58,7 @@ UTILITIES
 
 Amounts are exact decimal strings. Sends require an interactive terminal to unlock
 the encrypted keystore; --yes skips the transaction confirmation prompt.
-Run `help TOPIC` for focused help: wallet, chain, status, send, token, tx,
+Run `help TOPIC` for focused help: wallet, chain, status, send, token, stake, tx,
 address, balance, nonce, gas, history.
 Advanced commands are hidden; run `help --verbose` to show them.
 """
@@ -180,6 +190,36 @@ history [COUNT]
   Show the most recent shell commands (default 20). History is stored as plain
   command text in the profile's config directory; secret values are never part of
   a command.
+""",
+    "stake": """STAKING
+
+Staking is available on Monad (validator IDs) and BNB Smart Chain (operator
+addresses). Reads are free. Delegate, undelegate, claim, withdraw, and compound
+sign a transaction through Foundry's hidden keystore prompt.
+
+stake validators [--limit N]
+  List validators with their total stake and commission.
+stake status [TARGET]
+  Show the current epoch and your delegations. On BNB Smart Chain, pass an
+  operator address to see that validator's pool and your share balance.
+stake info TARGET
+  Show one validator's full details.
+stake delegate TARGET AMOUNT
+  Add stake. Monad amounts are MON; BNB Smart Chain amounts are BNB.
+stake undelegate TARGET AMOUNT
+  Start removing stake. On Monad you later call `stake withdraw`; on BNB Smart
+  Chain the amount is converted to validator shares and becomes claimable after
+  the unbonding period.
+stake claim TARGET [REQUEST_NUMBER]
+  Claim accumulated rewards (Monad), or claim unbonded BNB (BNB Smart Chain).
+stake withdraw VALIDATOR_ID WITHDRAW_ID   (Monad only)
+  Reclaim an undelegated amount after the withdrawal delay.
+stake compound VALIDATOR_ID               (Monad only)
+  Re-delegate accumulated rewards.
+
+Writes estimate gas first and ask for confirmation unless --yes is given;
+--dry-run prints the estimate without signing. Monad staking changes take effect
+at the next epoch boundary.
 """,
 }
 

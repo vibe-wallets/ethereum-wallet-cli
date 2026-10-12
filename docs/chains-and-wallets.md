@@ -52,6 +52,15 @@ Native coin amounts are entered in whole currency units, such as `0.01` ETH or M
 
 Avoid copying values through spreadsheets or tools that round large integers. JSON output may represent blockchain quantities as decimal or hexadecimal strings so clients can preserve their full precision.
 
+## Staking per chain
+
+Staking is delegated to each chain's own system contract or precompile; the CLI does not implement staking logic itself. It is available on Monad and BNB Smart Chain only.
+
+- Monad uses the `0x0000000000000000000000000000000000001000` staking precompile. Validators are numeric IDs, stake is MON, `delegate` becomes active at the next epoch, undelegating requires a later `withdraw`, and rewards are claimed or compounded with a validator ID.
+- BNB Smart Chain uses the `0x0000000000000000000000000000000000002002` StakeHub system contract. Validators are operator addresses, stake is BNB, undelegation is share-based and becomes claimable after the network's unbonding period.
+
+All staking writes are real transactions: the CLI estimates gas, asks for confirmation unless `--yes` is given, and signs through Foundry's hidden keystore prompt. Reads (`stake status`, `stake validators`, `stake info`) are free. Staking commands are rejected on networks without a backend.
+
 ## Chain references
 
 For up-to-date chain IDs and official RPC details, consult [Monad mainnet network information](https://docs.monad.xyz/developer-essentials/network-information), [Monad testnet network information](https://docs.monad.xyz/developer-essentials/testnets), and the [BNB Smart Chain JSON-RPC endpoints](https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/json-rpc-endpoint/). Network parameters and public endpoints can change. The CLI's displayed built-in configuration is what this build will use. On BNB Smart Chain the base fee is pinned to 0 (BEP-226); the gas price is the real cost.

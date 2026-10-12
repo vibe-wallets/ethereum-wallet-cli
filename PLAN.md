@@ -90,6 +90,28 @@ BNB Smart Chain profile
   while the shared `--rpc-url` / `*_WALLET_RPC_URL` override already selects a custom
   provider for a single run. No provider-selection command is implemented yet.
 
+Staking on Monad and BNB Smart Chain
+
+- Added a `stake ...` command surface backed by one per-chain module
+  (`src/evm_wallet/staking.py`): `stake validators`, `stake status`, `stake info`,
+  `stake delegate`, `stake undelegate`, and `stake claim`, plus Monad-only
+  `stake withdraw` and `stake compound`.
+- Monad uses the `0x1000` staking precompile (validator IDs, MON, epoch timing,
+  1 gwei dust threshold). BNB Smart Chain uses the `0x2002` StakeHub system
+  contract (operator addresses, BNB, share-based undelegation, unbonding period).
+  Reads decode Cast's JSON; writes reuse the estimate/confirm/sign/broadcast path,
+  so signing stays in Foundry and secrets never touch argv.
+- Staking commands are shown in the default help (not hidden as advanced) and are
+  documented in `help stake`, the README, and the command cookbook.
+- Docker E2E: because Monad's staking is a precompile, the suite installs compiled
+  mock contracts with `anvil_setCode` at `0x1000` (Monad) and `0x2002`/`0x3003`
+  (BSC). Anvil reserves `0x1000` for chain ID 143, so the Monad node runs with
+  `--network ethereum --chain-id 143`, which keeps the reported chain ID while
+  freeing the address. Both profiles then perform a real signed delegation and the
+  mock state is verified.
+- Validation: 119 offline tests, plus the Docker E2E covering staking reads,
+  dry-runs, a real signed write, and mock-state verification on Monad and BSC.
+
 Distribution decision and delivery fix
 - The GHCR package is distributed privately. The `publish` job publishes the immutable
   commit-SHA image; `published-e2e` and `default-image-e2e` grant `packages: read` to

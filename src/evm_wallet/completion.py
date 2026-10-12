@@ -28,6 +28,7 @@ COMMANDS = [
     "nonce",
     "quit",
     "send",
+    "stake",
     "status",
     "token",
     "tx",
@@ -52,10 +53,28 @@ SUBCOMMANDS: dict[str, list[str]] = {
     "tx": ["inspect", "list", "watch"],
     "contact": ["add", "list", "remove"],
     "config": ["show"],
+    "stake": [
+        "claim",
+        "compound",
+        "delegate",
+        "info",
+        "status",
+        "undelegate",
+        "validators",
+        "withdraw",
+    ],
 }
 
 NETWORKS = ["local", "mainnet", "testnet"]
 TRANSFER_FLAGS = ["--dry-run", "--yes"]
+STAKING_FLAGS = [
+    "--dry-run",
+    "--limit",
+    "--no-vote-power",
+    "--shares",
+    "--withdraw-id",
+    "--yes",
+]
 ALIAS_ARG_ACTIONS = {"default", "delete", "info", "use"}
 
 
@@ -104,6 +123,12 @@ def complete_candidates(
         return _match(SUBCOMMANDS["tx"], partial) if len(words) == 1 else []
     if head in {"contact", "config"}:
         return _match(SUBCOMMANDS[head], partial) if len(words) == 1 else []
+    if head == "stake":
+        if len(words) == 1:
+            return _match(SUBCOMMANDS["stake"], partial)
+        if partial.startswith("-"):
+            return _match(STAKING_FLAGS, partial)
+        return []
     if head == "send":
         return _match(TRANSFER_FLAGS, partial) if partial.startswith("-") else []
     if head in {"address", "balance", "nonce"} and len(words) == 1:

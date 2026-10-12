@@ -1,0 +1,25 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "StakeHubMock.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity 0.8.30;\n\n/// Minimal stand-in for the BSC StakeHub system contract at 0x2002.\n///\n/// The Docker E2E installs this runtime at 0x2002 with `anvil_setCode`, so the\n/// wallet's real `stake ...` commands exercise encoding, estimation, signing, and\n/// receipts against an Anvil node with the BSC chain ID.\ncontract StakeHubMock {\n    address public constant CREDIT = 0x0000000000000000000000000000000000003003;\n    address public constant OPERATOR = 0x00000000000000000000000000000000000000bb;\n\n    mapping(address => uint256) public delegated;\n\n    struct Description {\n        string moniker;\n        string identity;\n        string website;\n        string details;\n    }\n\n    function unbondPeriod() external pure returns (uint256) {\n        return 7 days;\n    }\n\n    function minSelfDelegationBNB() external pure returns (uint256) {\n        return 2_000 ether;\n    }\n\n    function minDelegationBNBChange() external pure returns (uint256) {\n        return 1 ether;\n    }\n\n    function maxElectedValidators() external pure returns (uint256) {\n        return 45;\n    }\n\n    function getValidatorElectionInfo(\n        uint256,\n        uint256\n    ) external pure returns (address[] memory, uint256[] memory, bytes[] memory, uint256) {\n        address[] memory consensus = new address[](2);\n        consensus[0] = address(0x00000000000000000000000000000000000000cc);\n        consensus[1] = address(0x00000000000000000000000000000000000000dd);\n        uint256[] memory powers = new uint256[](2);\n        powers[0] = 1_000 ether;\n        powers[1] = 2_000 ether;\n        bytes[] memory votes = new bytes[](2);\n        votes[0] = hex\"01\";\n        votes[1] = hex\"02\";\n        return (consensus, powers, votes, 2);\n    }\n\n    function consensusToOperator(address) external pure returns (address) {\n        return OPERATOR;\n    }\n\n    function getValidatorCommission(\n        address\n    ) external pure returns (uint64, uint64, uint64) {\n        return (900, 3_000, 700);\n    }\n\n    function getValidatorDescription(\n        address\n    ) external pure returns (Description memory) {\n        return Description(\"Mock Validator\", \"mock\", \"https://example.invalid\", \"E2E fixture\");\n    }\n\n    function getValidatorBasicInfo(address) external pure returns (uint256, bool, uint256) {\n        return (1_700_000_000, false, 0);\n    }\n\n    function getValidatorCreditContract(address) external pure returns (address) {\n        return CREDIT;\n    }\n\n    function delegate(address, bool) external payable {\n        require(msg.value >= 1 ether, \"min delegation\");\n        delegated[msg.sender] += msg.value;\n    }\n\n    function undelegate(address, uint256 shares) external pure {\n        require(shares > 0, \"shares\");\n    }\n\n    function claim(address, uint256) external pure {}\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "none"
+    },
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.deployedBytecode.object"
+        ]
+      }
+    }
+  }
+}

@@ -50,6 +50,7 @@ Network mappings are fixed per entrypoint: Ethereum `mainnet` is chain `1`, `tes
 - Send native coin or an ERC-20 transfer, with a dry-run estimate or an explicit confirmation.
 - Rename or delete local wallet aliases; deletion never touches on-chain funds.
 - Inspect transaction details by transaction hash.
+- Read staking state and delegate, undelegate, and claim on Monad and BNB Smart Chain (plus Monad-only `stake withdraw` and `stake compound`).
 - Use an interactive shell with Tab completion and persisted history, direct argv commands, or one-shot `-c` commands; request JSON output with `--json`.
 
 The tool does not implement its own cryptography, ABI encoder, or JSON-RPC client. It does not support seed phrases, hardware wallets, arbitrary contract transaction construction, swapping, bridging, staking, or smart-account flows.
@@ -76,10 +77,23 @@ token balance CONTRACT [ADDRESS]
 send DESTINATION AMOUNT [--dry-run | --yes]
 token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
 tx inspect HASH
+stake validators [--limit N]
+stake status [TARGET]
+stake info TARGET
+stake delegate TARGET AMOUNT [--dry-run | --yes]
+stake undelegate TARGET AMOUNT [--dry-run | --yes]
+stake claim TARGET [--dry-run | --yes]
 history [COUNT]
 help [TOPIC]
 clear
 ```
+
+On Monad, `TARGET` is a validator ID and `AMOUNT` is MON; Monad also supports
+`stake withdraw VALIDATOR_ID WITHDRAW_ID` and `stake compound VALIDATOR_ID`. On
+BNB Smart Chain, `TARGET` is a validator operator address and `AMOUNT` is BNB.
+Staking commands are read-only except the write verbs, which estimate gas, ask
+for confirmation unless `--yes` is given, and sign through Foundry's hidden
+keystore prompt. Run `help stake` for details.
 
 The top-level options are `-c 'COMMAND'` / `--command 'COMMAND'` for a one-shot command, `--network mainnet|testnet|local` to choose a profile-supported network, `--rpc-url URL` to override its RPC endpoint, `--json` for JSON output, `--config-dir PATH` for an explicit state directory, and `--version`. Direct command arguments are also supported; when no command is supplied, the CLI opens its interactive shell. JSON output is available for one-shot commands only. Fresh invocations default to the entrypoint's mainnet; a selected network applies to that invocation or shell only.
 

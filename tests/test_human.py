@@ -232,6 +232,87 @@ class ClearAndRenderTests(unittest.TestCase):
         )
         self.assertIn("deleted locally", deleted.getvalue())
 
+    def test_staking_views_and_receipts_render(self):
+        status = io.StringIO()
+        _render_human(
+            {
+                "command": "stake status",
+                "chain": "mainnet",
+                "chain_id": 143,
+                "address": "0x" + "11" * 20,
+                "epoch": 7,
+                "in_epoch_delay": False,
+                "dust_threshold": "0.000000001 MON",
+                "withdrawal_delay_epochs": 1,
+                "delegations": [
+                    {
+                        "validator_id": 11,
+                        "stake": "1",
+                        "unclaimed_rewards": "2",
+                        "pending_stake": "0",
+                    }
+                ],
+            },
+            status,
+        )
+        self.assertIn("STAKING STATUS", status.getvalue())
+        self.assertIn("DELEGATIONS", status.getvalue())
+        self.assertIn("11", status.getvalue())
+
+        validators = io.StringIO()
+        _render_human(
+            {
+                "command": "stake validators",
+                "chain": "mainnet",
+                "validators": [
+                    {
+                        "operator": "0x" + "bb" * 20,
+                        "consensus": "0x" + "cc" * 20,
+                        "stake": "1",
+                        "commission": "9.00",
+                    }
+                ],
+            },
+            validators,
+        )
+        self.assertIn("VALIDATORS", validators.getvalue())
+        self.assertIn("9.00%", validators.getvalue())
+
+        preview = io.StringIO()
+        _render_human(
+            {
+                "command": "stake delegate",
+                "dry_run": True,
+                "chain": "mainnet",
+                "from_wallet": "primary",
+                "from": "0x" + "11" * 20,
+                "validator_id": "11",
+                "amount": "1 MON",
+                "estimated_gas": "51234",
+            },
+            preview,
+        )
+        self.assertIn("STAKE DELEGATE", preview.getvalue())
+        self.assertIn("1 MON", preview.getvalue())
+
+        receipt = io.StringIO()
+        _render_human(
+            {
+                "command": "stake claim",
+                "dry_run": False,
+                "chain": "mainnet",
+                "from_wallet": "primary",
+                "from": "0x" + "11" * 20,
+                "validator_id": "11",
+                "estimated_gas": "51234",
+                "wallet": "primary",
+                "transaction_hash": "0x" + "aa" * 32,
+            },
+            receipt,
+        )
+        self.assertIn("Stake claim submitted", receipt.getvalue())
+        self.assertIn("0x" + "aa" * 32, receipt.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

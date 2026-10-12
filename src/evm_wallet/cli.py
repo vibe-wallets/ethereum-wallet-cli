@@ -494,6 +494,186 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             ),
             file=output,
         )
+    elif command == "stake status":
+        if "epoch" in result:
+            rows = [
+                ("Network", network_label(str(result["chain"]), stream=output)),
+                ("Address", result["address"]),
+                ("Epoch", str(result["epoch"])),
+                ("In epoch delay", "yes" if result["in_epoch_delay"] else "no"),
+                ("Dust threshold", str(result["dust_threshold"])),
+                ("Withdrawal delay", f"{result['withdrawal_delay_epochs']} epoch"),
+            ]
+            print(section_title("STAKING STATUS", stream=output), file=output)
+            print(key_value_rows(rows, stream=output), file=output)
+            delegations = result.get("delegations", [])
+            print(section_title("DELEGATIONS", stream=output), file=output)
+            if not delegations:
+                print(
+                    color("No delegations found for this wallet.", "muted", stream=output),
+                    file=output,
+                )
+            else:
+                table_rows = [
+                    [
+                        str(item["validator_id"]),
+                        item["stake"],
+                        item["unclaimed_rewards"],
+                        item["pending_stake"],
+                    ]
+                    for item in delegations
+                ]
+                print(
+                    table(
+                        table_rows,
+                        ["VALIDATOR", "STAKE (MON)", "UNCLAIMED", "PENDING"],
+                        stream=output,
+                    ),
+                    file=output,
+                )
+        else:
+            parameters = result.get("parameters", {})
+            rows = [
+                ("Network", network_label(str(result["chain"]), stream=output)),
+                ("Address", result["address"]),
+                ("Unbond period", f"{parameters.get('unbond_period_seconds')} s"),
+                ("Min self delegation", f"{parameters.get('min_self_delegation')} BNB"),
+                ("Min delegation change", f"{parameters.get('min_delegation_change')} BNB"),
+                ("Max elected validators", str(parameters.get("max_elected_validators"))),
+            ]
+            print(section_title("STAKING STATUS", stream=output), file=output)
+            print(key_value_rows(rows, stream=output), file=output)
+            delegation = result.get("delegation")
+            if delegation:
+                delegation_rows = [
+                    ("Operator", delegation["operator"]),
+                    ("Credit contract", delegation["credit_contract"]),
+                    ("Pooled BNB", delegation["pooled_bnb"], "emphasis"),
+                    ("Shares", delegation["shares"]),
+                    ("Commission", f"{delegation['commission']}%"),
+                    ("Pending unbond requests", str(delegation["pending_unbond_requests"])),
+                    ("Claimable unbond requests", str(delegation["claimable_unbond_requests"])),
+                ]
+                print(section_title("DELEGATION", stream=output), file=output)
+                print(key_value_rows(delegation_rows, stream=output), file=output)
+            else:
+                print(
+                    color(
+                        "Pass an operator address: stake status OPERATOR.",
+                        "muted",
+                        stream=output,
+                    ),
+                    file=output,
+                )
+    elif command == "stake validators":
+        validators = result.get("validators", [])
+        print(section_title("VALIDATORS", stream=output), file=output)
+        if not validators:
+            print(color("No validators returned.", "muted", stream=output), file=output)
+        elif "validator_id" in validators[0]:
+            rows = [
+                [
+                    str(item["validator_id"]),
+                    item["stake"],
+                    f"{item['commission']}%",
+                    item["auth_address"],
+                ]
+                for item in validators
+            ]
+            print(
+                table(rows, ["ID", "STAKE (MON)", "COMMISSION", "AUTH ADDRESS"], stream=output),
+                file=output,
+            )
+        else:
+            rows = [
+                [item["operator"], item["consensus"], item["stake"], f"{item['commission']}%"]
+                for item in validators
+            ]
+            print(
+                table(
+                    rows,
+                    ["OPERATOR", "CONSENSUS", "STAKE (BNB)", "COMMISSION"],
+                    stream=output,
+                ),
+                file=output,
+            )
+    elif command == "stake info":
+        if "validator_id" in result:
+            rows = [
+                ("Validator", str(result["validator_id"])),
+                ("Network", network_label(str(result["chain"]), stream=output)),
+                ("Auth address", result["auth_address"]),
+                ("Stake", f"{result['stake']} MON", "emphasis"),
+                ("Commission", f"{result['commission']}%"),
+                ("Consensus stake", f"{result['consensus_stake']} MON"),
+                ("Consensus commission", f"{result['consensus_commission']}%"),
+                ("Snapshot stake", f"{result['snapshot_stake']} MON"),
+                ("Snapshot commission", f"{result['snapshot_commission']}%"),
+                ("Unclaimed rewards", f"{result['unclaimed_rewards']} MON"),
+                ("Flags", str(result["flags"])),
+                ("SECP pubkey", shorten_address(result["secp_pubkey"], leading=10, trailing=6)),
+                ("BLS pubkey", shorten_address(result["bls_pubkey"], leading=10, trailing=6)),
+            ]
+            print(section_title("VALIDATOR", stream=output), file=output)
+            print(key_value_rows(rows, stream=output), file=output)
+        else:
+            rows = [
+                ("Operator", result["operator"]),
+                ("Network", network_label(str(result["chain"]), stream=output)),
+                ("Credit contract", result["credit_contract"]),
+                ("Total pooled", f"{result['total_pooled_bnb']} BNB", "emphasis"),
+                ("Commission", f"{result['commission_rate']}%"),
+                ("Created", str(result["created_time"])),
+                ("Jailed", "yes" if result["jailed"] else "no"),
+                ("Jail until", str(result["jail_until"])),
+                ("Moniker", result["moniker"]),
+                ("Website", result["website"] or "-"),
+                ("Details", result["details"] or "-"),
+            ]
+            print(section_title("VALIDATOR", stream=output), file=output)
+            print(key_value_rows(rows, stream=output), file=output)
+    elif command.startswith("stake ") and command not in {
+        "stake status",
+        "stake validators",
+        "stake info",
+    }:
+        action = command[len("stake ") :]
+        rows: list[Sequence[object]] = []
+        if "operator" in result:
+            rows.append(("Operator", result["operator"]))
+        if "validator_id" in result:
+            rows.append(("Validator", str(result["validator_id"])))
+        if "amount" in result:
+            rows.append(("Amount", result["amount"], "emphasis"))
+        if "shares" in result:
+            rows.append(("Shares", str(result["shares"])))
+        if "withdraw_id" in result:
+            rows.append(("Withdraw ID", str(result["withdraw_id"])))
+        if "request_number" in result:
+            request = result["request_number"]
+            rows.append(("Request", "all" if request == 0 else str(request)))
+        rows.append(("Estimated gas", str(result.get("estimated_gas") or "unknown")))
+        if result.get("dry_run"):
+            print(
+                action_preview(
+                    f"STAKE {action.upper()} · TRANSACTION PREVIEW",
+                    [("Network", network_label(str(result["chain"]), stream=output)), *rows],
+                    stream=output,
+                ),
+                file=output,
+            )
+        else:
+            rows.insert(0, ("Wallet", f"{result['wallet']} ({result['from']})"))
+            print(
+                format_transaction_receipt(
+                    action=f"Stake {action}",
+                    network=str(result["chain"]),
+                    rows=rows,
+                    signature=result.get("transaction_hash"),
+                    stream=output,
+                ),
+                file=output,
+            )
     else:
         print(json.dumps(result, indent=2, sort_keys=True), file=output)
 

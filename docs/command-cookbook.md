@@ -121,6 +121,43 @@ tx inspect 0xTransactionHash
 
 A transaction can be pending, replaced, dropped, or reverted. A submitted hash is evidence that the node accepted a broadcast request, not proof of final success. Query it again if its status is still pending.
 
+## Stake on Monad
+
+On Monad, validators are identified by a numeric ID and stake is denominated in MON:
+
+```text
+stake validators --limit 10
+stake info 97
+stake status
+stake status 97
+stake delegate 97 100 --dry-run
+stake delegate 97 100
+stake undelegate 97 50 --withdraw-id 0
+stake withdraw 97 0
+stake claim 97
+stake compound 97
+```
+
+Delegations below 1 gwei revert, and staking changes take effect at the next epoch boundary. Undelegating starts a withdrawal request; after the withdrawal delay you call `stake withdraw` with the same ID to reclaim the MON. `stake claim` withdraws accumulated rewards, while `stake compound` re-delegates them.
+
+## Stake on BNB Smart Chain
+
+On BNB Smart Chain, validators are identified by an operator address and stake is denominated in BNB:
+
+```text
+stake validators --limit 10
+stake info 0xValidatorOperatorAddress
+stake status 0xValidatorOperatorAddress
+stake delegate 0xValidatorOperatorAddress 1 --dry-run
+stake delegate 0xValidatorOperatorAddress 1
+stake undelegate 0xValidatorOperatorAddress 1
+stake undelegate 0xValidatorOperatorAddress 1000000000000000000 --shares
+stake claim 0xValidatorOperatorAddress
+stake claim 0xValidatorOperatorAddress 0
+```
+
+Validators are listed with their stake and commission. `stake delegate` accepts the minimum delegation set by the network (currently 1 BNB). `stake undelegate` converts a BNB amount to validator shares; pass `--shares` to specify shares directly. Undelegated BNB becomes claimable after the unbonding period, and `stake claim` with request number `0` claims from all unbonding requests.
+
 ## Shell utilities and completion
 
 ```text

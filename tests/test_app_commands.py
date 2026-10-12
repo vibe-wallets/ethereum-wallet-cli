@@ -46,6 +46,7 @@ class FakeCastRunner:
         self.receipt_response = "null"
         self.receipt_sequence: list[str] = []
         self.estimate = "51234\n"
+        self.staking: dict[str, object] = {}
 
     def __call__(self, command: list[str], **kwargs):
         self.calls.append((command, kwargs))
@@ -80,7 +81,9 @@ class FakeCastRunner:
             )
         elif args[:1] == ["call"]:
             signature = args[2]
-            if signature == "transfer(address,uint256)":
+            if signature in self.staking:
+                output = json.dumps(self.staking[signature])
+            elif signature == "transfer(address,uint256)":
                 output = "0x" + "0" * 63 + ("1" if self.transfer_success else "0")
             elif signature == "approve(address,uint256)":
                 output = "0x" + "0" * 63 + ("1" if self.transfer_success else "0")
@@ -158,11 +161,14 @@ class AppCommandTests(unittest.TestCase):
         self.prompts: list[str] = []
         self.app = self.make_app()
 
-    def make_app(self, *, terminal: bool = False, answer: str = "yes") -> Application:
+    def make_app(
+        self, *, terminal: bool = False, answer: str = "yes", profile: str = "ethereum"
+    ) -> Application:
         def prompt(text: str) -> str:
             self.prompts.append(text)
             return answer
 
+        self.runner.chain_id = {"ethereum": 1, "monad": 143, "bsc": 56}.get(profile, 1)
         tty = TTY() if terminal else None
         return Application(
             self.config_dir,
@@ -171,6 +177,8 @@ class AppCommandTests(unittest.TestCase):
             input_fn=prompt,
             stdin=tty,
             stdout=tty,
+            profile=profile,
+            network_name="mainnet",
         )
 
     def add_wallet(self, alias: str = "primary", address: str = ADDRESS) -> Path:
@@ -769,6 +777,192 @@ class AppCommandTests(unittest.TestCase):
         listed = execute(["wallet", "list"], self.app)["wallets"]
         tags = {entry["alias"]: entry["watch_only"] for entry in listed}
         self.assertEqual(tags, {"signer": False, "cold": True})
+
+    # --- Staking ------------------------------------------------------------
+
+    MONAD_EPOCH = "getEpoch()(uint64,bool)"
+    MONAD_VALSET = "getExecutionValidatorSet(uint32)(bool,uint32,uint64[])"
+    MONAD_VALIDATOR = (
+        "getValidator(uint64)(address,uint64,uint256,uint256,uint256,uint256,"
+        "uint256,uint256,uint256,uint256,bytes,bytes)"
+    )
+    MONAD_DELEGATOR = (
+        "getDelegator(uint64,address)(uint256,uint256,uint256,uint256,uint256,uint64,uint64)"
+    )
+    MONAD_DELEGATIONS = "getDelegations(address,uint64)(bool,uint64,uint64[])"
+
+    BSC_ELECTION = "getValidatorElectionInfo(uint256,uint256)(address[],uint256[],bytes[],uint256)"
+    BSC_CONSENSUS_TO_OPERATOR = "consensusToOperator(address)(address)"
+    BSC_COMMISSION = "getValidatorCommission(address)((uint64,uint64,uint64))"
+    BSC_DESCRIPTION = "getValidatorDescription(address)((string,string,string,string))"
+    BSC_BASIC = "getValidatorBasicInfo(address)(uint256,bool,uint256)"
+    BSC_CREDIT = "getValidatorCreditContract(address)(address)"
+
+    BSC_OPERATOR = "0x" + "bb" * 20
+    BSC_CREDIT_CONTRACT = "0x" + "30" * 20
+
+    def _monad_staking(self) -> dict[str, object]:
+        return {
+            self.MONAD_EPOCH: [7, False],
+            self.MONAD_VALSET: [True, 0, [11, 22]],
+            self.MONAD_VALIDATOR: [
+                ADDRESS,
+                "0",
+                "1000000000000000000",
+                "0",
+                "50000000000000000",
+                "2000000000000000000",
+                "1000000000000000000",
+                "50000000000000000",
+                "1000000000000000000",
+                "50000000000000000",
+                "0x01",
+                "0x02",
+            ],
+            self.MONAD_DELEGATOR: [
+                "1000000000000000000",
+                "0",
+                "0",
+                "0",
+                "0",
+                0,
+                0,
+            ],
+            self.MONAD_DELEGATIONS: [True, 0, [11]],
+        }
+
+    def _bsc_staking(self) -> dict[str, object]:
+        return {
+            self.BSC_ELECTION: [
+                ["0x" + "cc" * 20, "0x" + "dd" * 20],
+                ["1000000000000000000", "2000000000000000000"],
+                ["0x01", "0x02"],
+                "2",
+            ],
+            self.BSC_CONSENSUS_TO_OPERATOR: [self.BSC_OPERATOR],
+            self.BSC_COMMISSION: [[900, 3000, 700]],
+            self.BSC_DESCRIPTION: [["Mock Validator", "mock", "https://example.invalid", "x"]],
+            self.BSC_BASIC: ["1700000000", False, "0"],
+            self.BSC_CREDIT: [self.BSC_CREDIT_CONTRACT],
+            "balanceOf(address)(uint256)": ["0"],
+            "getPooledBNB(address)(uint256)": ["5000000000000000000"],
+            "getSharesByPooledBNB(uint256)(uint256)": ["1000000000000000000"],
+            "pendingUnbondRequest(address)(uint256)": ["1"],
+            "claimableUnbondRequest(address)(uint256)": ["0"],
+            "totalPooledBNB()(uint256)": ["9000000000000000000"],
+            "minDelegationBNBChange()(uint256)": ["1000000000000000000"],
+        }
+
+    def test_monad_stake_validators_info_and_status(self) -> None:
+        self.add_wallet()
+        app = self.make_app(profile="monad")
+        self.runner.staking = self._monad_staking()
+
+        validators = execute(["stake", "validators", "--limit", "2"], app)
+        self.assertEqual(validators["command"], "stake validators")
+        self.assertEqual([item["validator_id"] for item in validators["validators"]], [11, 22])
+        self.assertEqual(validators["validators"][0]["commission"], "5.00")
+        self.assertEqual(validators["validators"][0]["stake"], "1")
+
+        info = execute(["stake", "info", "11"], app)
+        self.assertEqual(info["auth_address"], ADDRESS)
+        self.assertEqual(info["commission"], "5.00")
+        self.assertEqual(info["unclaimed_rewards"], "2")
+        self.assertEqual(info["secp_pubkey"], "0x01")
+
+        status = execute(["stake", "status"], app)
+        self.assertEqual(status["epoch"], 7)
+        self.assertFalse(status["in_epoch_delay"])
+        self.assertEqual(status["delegations"][0]["validator_id"], 11)
+        self.assertEqual(status["delegations"][0]["stake"], "1")
+
+    def test_monad_stake_writes_build_expected_cast_arguments(self) -> None:
+        self.add_wallet()
+        app = self.make_app(terminal=True, profile="monad")
+
+        dry = execute(["stake", "delegate", "11", "0.5", "--dry-run"], app)
+        self.assertTrue(dry["dry_run"])
+        self.assertEqual(dry["amount"], "0.5 MON")
+        self.assertEqual(dry["validator_id"], "11")
+        self.assertNotIn("send", [call[0] for call in self.runner.commands()])
+
+        sent = execute(["stake", "delegate", "11", "0.5", "--yes"], app)
+        self.assertEqual(sent["transaction_hash"], TX_HASH)
+        send = self.runner.commands()[-1]
+        self.assertEqual(send[0], "send")
+        self.assertIn("0x0000000000000000000000000000000000001000", send)
+        self.assertIn("delegate(uint64)", send)
+        self.assertIn("11", send)
+        self.assertIn("500000000000000000wei", send)
+        self.assertIn("143", send)
+        self.assertEqual(execute(["tx", "list"], app)["transactions"][-1]["kind"], "stake delegate")
+
+        execute(["stake", "undelegate", "11", "0.5", "--withdraw-id", "3", "--yes"], app)
+        undelegate = self.runner.commands()[-1]
+        self.assertIn("undelegate(uint64,uint256,uint8)", undelegate)
+        self.assertIn("500000000000000000", undelegate)
+        self.assertIn("3", undelegate)
+
+        execute(["stake", "withdraw", "11", "3", "--yes"], app)
+        self.assertIn("withdraw(uint64,uint8)", self.runner.commands()[-1])
+        execute(["stake", "compound", "11", "--yes"], app)
+        self.assertIn("compound(uint64)", self.runner.commands()[-1])
+        execute(["stake", "claim", "11", "--yes"], app)
+        self.assertIn("claimRewards(uint64)", self.runner.commands()[-1])
+
+    def test_bsc_stake_reads_and_writes(self) -> None:
+        self.add_wallet()
+        app = self.make_app(terminal=True, profile="bsc")
+        self.runner.staking = self._bsc_staking()
+
+        validators = execute(["stake", "validators", "--limit", "2"], app)
+        self.assertEqual(validators["validators"][0]["operator"], self.BSC_OPERATOR)
+        self.assertEqual(validators["validators"][0]["commission"], "9.00")
+        self.assertEqual(validators["validators"][0]["stake"], "1")
+
+        info = execute(["stake", "info", self.BSC_OPERATOR], app)
+        self.assertEqual(info["moniker"], "Mock Validator")
+        self.assertEqual(info["commission_rate"], "9.00")
+        self.assertEqual(info["total_pooled_bnb"], "9")
+
+        status = execute(["stake", "status", self.BSC_OPERATOR], app)
+        self.assertEqual(status["delegation"]["pooled_bnb"], "5")
+        self.assertEqual(status["delegation"]["pending_unbond_requests"], 1)
+
+        execute(["stake", "delegate", self.BSC_OPERATOR, "1", "--yes"], app)
+        delegate = self.runner.commands()[-1]
+        self.assertIn("delegate(address,bool)", delegate)
+        self.assertIn(self.BSC_OPERATOR, delegate)
+        self.assertIn("1000000000000000000wei", delegate)
+
+        execute(["stake", "undelegate", self.BSC_OPERATOR, "1", "--yes"], app)
+        undelegate = self.runner.commands()[-1]
+        self.assertIn("undelegate(address,uint256)", undelegate)
+        self.assertIn("1000000000000000000", undelegate)
+
+        execute(["stake", "claim", self.BSC_OPERATOR, "--yes"], app)
+        claim = self.runner.commands()[-1]
+        self.assertIn("claim(address,uint256)", claim)
+        self.assertIn(self.BSC_OPERATOR, claim)
+
+    def test_stake_unknown_network_and_usage_errors(self) -> None:
+        with self.assertRaisesRegex(WalletCliError, "not supported"):
+            execute(["stake", "status"], self.app)
+        monad = self.make_app(profile="monad")
+        self.runner.staking = self._monad_staking()
+        with self.assertRaisesRegex(WalletCliError, "Usage: stake"):
+            execute(["stake"], monad)
+        with self.assertRaisesRegex(WalletCliError, "Usage: stake"):
+            execute(["stake", "made-up"], monad)
+        with self.assertRaisesRegex(WalletCliError, "at least"):
+            execute(["stake", "delegate", "11", "0.0000000001", "--dry-run"], monad)
+        with self.assertRaisesRegex(WalletCliError, "withdraw-id"):
+            execute(
+                ["stake", "undelegate", "11", "1", "--withdraw-id", "256", "--dry-run"],
+                monad,
+            )
+        with self.assertRaisesRegex(WalletCliError, "Choose either"):
+            execute(["stake", "claim", "11", "--dry-run", "--yes"], monad)
 
 
 if __name__ == "__main__":

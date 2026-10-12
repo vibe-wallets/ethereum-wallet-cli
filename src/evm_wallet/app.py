@@ -24,6 +24,7 @@ from .config import ConfigStore, validate_alias, validate_contact_name, validate
 from .errors import ConfigurationError, FoundryError, WalletCliError
 from .foundry import CastClient, parse_integer_output, unwrap_cast_json
 from .help import help_text
+from .staking import handle_stake
 from .txlog import TXLOG_LIMIT, append_transaction, read_transactions
 
 KEYSTORE_ADDRESS_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -382,6 +383,38 @@ class Application:
     def contract_string(self, chain: Chain, contract: str, signature: str) -> str:
         """Read a string value from a contract call on the active chain."""
         return _parse_cast_string(self.cast.call_raw(chain, contract, signature))
+
+    def estimate_contract_call(
+        self,
+        chain: Chain,
+        to: str,
+        signature: str,
+        arguments: list[str],
+        sender: str,
+        value_wei: int = 0,
+    ) -> str:
+        """Estimate gas for a contract call from ``sender`` without signing."""
+        args = [to, signature, *arguments, "--from", sender]
+        if value_wei:
+            args += ["--value", f"{value_wei}wei"]
+        return self.cast.estimate(chain, args)
+
+    def broadcast_contract_call(
+        self,
+        chain: Chain,
+        to: str,
+        signature: str,
+        arguments: list[str],
+        sender: str,
+        keystore: Path,
+        value_wei: int = 0,
+    ) -> tuple[dict[str, Any], str, int]:
+        """Sign and broadcast a contract call through Cast's encrypted keystore."""
+        args = [to, signature, *arguments, "--from", sender, "--keystore", str(keystore)]
+        if value_wei:
+            args += ["--value", f"{value_wei}wei"]
+        output = self.cast.send(chain, args)
+        return _parse_send_receipt(self, output, "staking")
 
     def record_transaction(self, record: dict[str, Any]) -> None:
         """Append a broadcast transaction to the local log (best effort)."""
@@ -1217,6 +1250,11 @@ def execute(command: list[str], app: Application, *, json_output: bool = False) 
                 "transaction_hash": tx_hash,
             }
         raise WalletCliError(TOKEN_USAGE)
+
+    # Staking delegation on Monad and BNB Smart Chain.
+    if tokens[0] == "stake":
+        return handle_stake(app, tokens)
+
     # Transaction and receipt inspection.
     if tokens[0] == "tx" and len(tokens) == 3 and tokens[1] == "inspect":
         tx_hash = validate_tx_hash(tokens[2])

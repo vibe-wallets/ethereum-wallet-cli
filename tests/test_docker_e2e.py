@@ -36,6 +36,25 @@ TOKEN_INITIAL_BALANCE = 12_345_000_000_000_000_000
 TOKEN_RUNTIME = (
     (ROOT / "tests" / "fixtures" / "TestToken.runtime.hex").read_text(encoding="utf-8").strip()
 )
+# Staking is a precompile/system contract, so Anvil gets mock runtimes installed
+# at the same addresses with `anvil_setCode` before the wallet calls them.
+MONAD_STAKING_MOCK = "0x0000000000000000000000000000000000001000"
+MONAD_STAKING_MOCK_RUNTIME = (
+    (ROOT / "tests" / "fixtures" / "MonadStakingMock.runtime.hex")
+    .read_text(encoding="utf-8")
+    .strip()
+)
+BSC_STAKE_HUB_MOCK = "0x0000000000000000000000000000000000002002"
+BSC_STAKE_HUB_MOCK_RUNTIME = (
+    (ROOT / "tests" / "fixtures" / "StakeHubMock.runtime.hex").read_text(encoding="utf-8").strip()
+)
+BSC_STAKE_CREDIT_MOCK = "0x0000000000000000000000000000000000003003"
+BSC_STAKE_CREDIT_MOCK_RUNTIME = (
+    (ROOT / "tests" / "fixtures" / "StakeCreditMock.runtime.hex")
+    .read_text(encoding="utf-8")
+    .strip()
+)
+BSC_MOCK_OPERATOR = "0x00000000000000000000000000000000000000bb"
 SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 
 
@@ -128,6 +147,11 @@ class DockerAnvilSandbox:
             "8545",
             "--chain-id",
             str(chain_id),
+            # Force the plain Ethereum EVM family. Anvil enables Monad's 0x1000
+            # staking precompile for chain ID 143, which would shadow the mock
+            # installed with anvil_setCode; this keeps the reported chain ID intact.
+            "--network",
+            "ethereum",
             "--silent",
         )
         self.containers[alias] = name
@@ -184,6 +208,9 @@ class DockerAnvilSandbox:
     def prepare_test_account(self, alias: str, address: str) -> None:
         self.cast_rpc(alias, "anvil_setBalance", address, f"0x{10_000 * 10**18:x}")
         self.cast_rpc(alias, "anvil_setCode", TOKEN, TOKEN_RUNTIME)
+        self.cast_rpc(alias, "anvil_setCode", MONAD_STAKING_MOCK, MONAD_STAKING_MOCK_RUNTIME)
+        self.cast_rpc(alias, "anvil_setCode", BSC_STAKE_HUB_MOCK, BSC_STAKE_HUB_MOCK_RUNTIME)
+        self.cast_rpc(alias, "anvil_setCode", BSC_STAKE_CREDIT_MOCK, BSC_STAKE_CREDIT_MOCK_RUNTIME)
         owner_slot = _run_docker(
             "exec",
             self.containers[alias],
@@ -201,6 +228,20 @@ class DockerAnvilSandbox:
             f"0x{TOKEN_INITIAL_BALANCE:064x}",
         )
         self.cast_rpc(alias, "anvil_setCode", FALSE_TOKEN, _static_erc20_runtime(0, transfer=False))
+
+    def cast_call(self, alias: str, address: str, signature: str, *params: str) -> str:
+        """Call a contract from inside the Anvil container and return stdout."""
+        return _run_docker(
+            "exec",
+            self.containers[alias],
+            "cast",
+            "call",
+            address,
+            signature,
+            *params,
+            "--rpc-url",
+            "http://127.0.0.1:8545",
+        ).stdout.strip()
 
     def transaction_count(self, alias: str, address: str) -> int:
         result = self.cast_rpc(alias, "eth_getTransactionCount", address, "latest")
@@ -715,6 +756,80 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
             self.assertIn("HISTORY", history)
             self.assertIn("wallet", history)
             self.assertIn("No external command ran", history)
+
+            # Staking reads and one real signed write against the chain's mock staking
+            # contract (a precompile has no deployed code, so Anvil gets one via setCode).
+            if profile == "monad":
+                stake_status = shell.command("stake status")
+                self.assertIn("STAKING STATUS", stake_status)
+                self.assertIn("Epoch", stake_status)
+                self.assertIn("cast call", stake_status)
+                stake_validators = shell.command("stake validators --limit 2")
+                self.assertIn("VALIDATORS", stake_validators)
+                self.assertIn("11", stake_validators)
+                self.assertIn("10.00%", stake_validators)
+                stake_info = shell.command("stake info 11")
+                self.assertIn("VALIDATOR", stake_info)
+                self.assertIn("10.00%", stake_info)
+                stake_dry = shell.command("stake delegate 11 1 --dry-run")
+                self.assertIn("STAKE DELEGATE", stake_dry)
+                self.assertIn("1 MON", stake_dry)
+                self.assertIn("cast estimate", stake_dry)
+                self.assertNotIn("cast send", stake_dry)
+                mock_stake = sandbox.cast_call(
+                    node_alias, MONAD_STAKING_MOCK, "stake(address,uint64)(uint256)", account, "11"
+                )
+                self.assertIn("0", mock_stake)
+                delegated = shell.command(
+                    "stake delegate 11 1 --yes", prompts=[(b"password:", password)]
+                )
+                self.assertNotIn(password, delegated)
+                self.assertIn("Stake delegate submitted", delegated)
+                self._assert_cast_sequence(delegated, ["chain-id", "estimate", "chain-id", "send"])
+                self.assertIn(
+                    "1000000000000000000",
+                    sandbox.cast_call(
+                        node_alias,
+                        MONAD_STAKING_MOCK,
+                        "stake(address,uint64)(uint256)",
+                        account,
+                        "11",
+                    ),
+                )
+            elif profile == "bsc":
+                stake_status = shell.command("stake status")
+                self.assertIn("STAKING STATUS", stake_status)
+                self.assertIn("Unbond period", stake_status)
+                stake_validators = shell.command("stake validators --limit 2")
+                self.assertIn("VALIDATORS", stake_validators)
+                self.assertIn(BSC_MOCK_OPERATOR.lower(), stake_validators.lower())
+                self.assertIn("9.00%", stake_validators)
+                stake_info = shell.command(f"stake info {BSC_MOCK_OPERATOR}")
+                self.assertIn("VALIDATOR", stake_info)
+                self.assertIn("Mock Validator", stake_info)
+                stake_status_operator = shell.command(f"stake status {BSC_MOCK_OPERATOR}")
+                self.assertIn("DELEGATION", stake_status_operator)
+                stake_dry = shell.command(f"stake delegate {BSC_MOCK_OPERATOR} 1 --dry-run")
+                self.assertIn("STAKE DELEGATE", stake_dry)
+                self.assertIn("1 BNB", stake_dry)
+                self.assertIn("cast estimate", stake_dry)
+                self.assertNotIn("cast send", stake_dry)
+                delegated = shell.command(
+                    f"stake delegate {BSC_MOCK_OPERATOR} 1 --yes",
+                    prompts=[(b"password:", password)],
+                )
+                self.assertNotIn(password, delegated)
+                self.assertIn("Stake delegate submitted", delegated)
+                self._assert_cast_sequence(
+                    delegated,
+                    ["chain-id", "call", "chain-id", "estimate", "chain-id", "send"],
+                )
+                self.assertIn(
+                    "1000000000000000000",
+                    sandbox.cast_call(
+                        node_alias, BSC_STAKE_HUB_MOCK, "delegated(address)(uint256)", account
+                    ),
+                )
 
             scratch = shell.command(
                 "wallet new scratch",

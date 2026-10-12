@@ -48,6 +48,23 @@ class CompletionTests(unittest.TestCase):
         )
         self.assertEqual(complete_candidates(["tx"], ""), ["inspect", "list", "watch"])
 
+    def test_stake_subcommands_and_flags(self):
+        self.assertEqual(
+            complete_candidates(["stake"], ""),
+            [
+                "claim",
+                "compound",
+                "delegate",
+                "info",
+                "status",
+                "undelegate",
+                "validators",
+                "withdraw",
+            ],
+        )
+        self.assertIn("--limit", complete_candidates(["stake", "validators"], "--"))
+        self.assertIn("--withdraw-id", complete_candidates(["stake", "undelegate", "11"], "--"))
+
     def test_transfer_flags_complete_only_after_a_dash(self):
         self.assertEqual(complete_candidates(["send"], ""), [])
         self.assertEqual(
@@ -62,6 +79,7 @@ class CompletionTests(unittest.TestCase):
     def test_help_topics_and_read_aliases(self):
         self.assertIn("wallet", complete_candidates(["help"], ""))
         self.assertIn("status", complete_candidates(["help"], "sta"))
+        self.assertIn("stake", complete_candidates(["help"], "sta"))
         self.assertIn("contact", complete_candidates(["help"], "con"))
         self.assertEqual(
             complete_candidates(["address"], "", ["daily", "ops"]),
