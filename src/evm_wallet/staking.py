@@ -33,9 +33,9 @@ _BALANCE_OF = "balanceOf(address)(uint256)"
 MONAD_DUST_THRESHOLD_WEI = 1_000_000_000  # 1 gwei, per Monad staking API
 MONAD_COMMISSION_BASE = 10**18
 BSC_COMMISSION_BASE = 10_000
-BSC_DEFAULT_LIMIT = 20
+BSC_DEFAULT_LIMIT = 10
 BSC_MAX_LIMIT = 45
-MONAD_DEFAULT_LIMIT = 25
+MONAD_DEFAULT_LIMIT = 10
 # Monad validator flags: ok, stake too low, auth address withdrew below the
 # minimum, and slashed for double signing (see the staking precompile).
 MONAD_VALIDATOR_FLAGS = (

@@ -202,12 +202,12 @@ addresses). Reads are free. Delegate, undelegate, claim, withdraw, and compound
 sign a transaction through Foundry's hidden keystore prompt.
 
 stake validators [--limit N] [--all] [--full]
-  List validators, highest stake first. By default only the active set for the
-  current epoch is listed; --all adds eligible validators outside it. Each row
-  carries a status decoded from the validator flags (ok, low-stake, withdrawn,
-  double-sign) and the auth address. --full adds the consensus and next-epoch
-  snapshot stakes and prints unshortened addresses. Read one validator per row,
-  so a large --limit is slow.
+  List validators, highest stake first, 10 by default. By default only the active
+  set for the current epoch is listed; --all adds eligible validators outside it.
+  Each row carries a status decoded from the validator flags (ok, low-stake,
+  withdrawn, double-sign) and the auth address. --full adds the consensus and
+  next-epoch snapshot stakes and prints unshortened addresses. Read one validator
+  per row, so a large --limit is slow.
 stake status [TARGET]
   Show the current epoch and your delegations. On BNB Smart Chain, pass an
   operator address to see that validator's pool and your share balance.

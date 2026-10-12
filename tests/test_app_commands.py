@@ -913,6 +913,7 @@ class AppCommandTests(unittest.TestCase):
         result = execute(["stake", "validators"], app)
         self.assertEqual([item["validator_id"] for item in result["validators"]], [22, 11])
         self.assertEqual(result["sorted_by"], "stake")
+        self.assertEqual(result["limit"], 10)
         self.assertTrue(result["active_only"])
         self.assertEqual(result["active_count"], 2)
         self.assertEqual(result["eligible_count"], 2)

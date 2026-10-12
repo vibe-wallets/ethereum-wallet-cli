@@ -143,7 +143,7 @@ stake compound 97
 
 Delegations below 1 gwei revert, and staking changes take effect at the next epoch boundary. Undelegating starts a withdrawal request; after the withdrawal delay you call `stake withdraw` with the same ID to reclaim the MON. `stake claim` withdraws accumulated rewards, while `stake compound` re-delegates them.
 
-`stake validators` lists the validators active in the current epoch, highest stake first, with a status decoded from the validator flags (`ok`, `low-stake`, `withdrawn`, `double-sign`). `--all` adds eligible validators outside the active set, and `--full` adds the consensus and next-epoch snapshot stakes and prints full addresses. One validator is read per row, so a large `--limit` takes proportionally longer. Stake columns are rounded down to whole MON so the table stays readable; `--json` keeps the exact value. `stake info --delegators` pages through `getDelegators` for an exact delegator count, which can take a while for a popular validator.
+`stake validators` lists the validators active in the current epoch, highest stake first, ten by default, with a status decoded from the validator flags (`ok`, `low-stake`, `withdrawn`, `double-sign`). `--all` adds eligible validators outside the active set, and `--full` adds the consensus and next-epoch snapshot stakes and prints full addresses. One validator is read per row, so a large `--limit` takes proportionally longer. Stake columns are rounded down to whole MON so the table stays readable; `--json` keeps the exact value. `stake info --delegators` pages through `getDelegators` for an exact delegator count, which can take a while for a popular validator.
 
 `status` lists the selected wallet's Monad delegations without any extra arguments.
 

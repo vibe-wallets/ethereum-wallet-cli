@@ -107,9 +107,9 @@ Staking on Monad and BNB Smart Chain
   Monad enumerates them with `getDelegations`; BNB Smart Chain reads the validator
   set with `getValidators` and batches the per-validator share lookups through the
   canonical Multicall3 contract, with a per-credit fallback for local chains.
-- `stake validators` lists the current epoch's active (consensus) validators,
-  which the precompile already returns ranked by stake, so ordering is exact
-  without reading the whole eligible set. Each row carries a status decoded from
+- `stake validators` lists the current epoch's ten highest-staked active
+  (consensus) validators, which the precompile already returns ranked by stake,
+  so ordering is exact without reading the whole eligible set. Each row carries a status decoded from
   the validator flags plus the auth address; `--all` appends eligible validators
   outside the active set, and `--full` adds the consensus and next-epoch snapshot
   stakes. `stake info` gained the same status plus an opt-in `--delegators` count
