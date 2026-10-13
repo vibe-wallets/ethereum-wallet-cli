@@ -213,12 +213,17 @@ stake info $target [--delegators]
   can take a while for a large validator.
 stake delegate $target AMOUNT
   Add stake. Monad amounts are MON; BNB Smart Chain amounts are BNB.
-stake undelegate $target AMOUNT
-  Start removing stake. On Monad you later call `stake withdraw`; on BNB Smart
-  Chain the amount is converted to validator shares and becomes claimable after
-  the unbonding period.
+stake undelegate $target AMOUNT | --all
+  Start removing stake. --all removes the whole active stake you hold with that
+  validator, and on Monad it also reports any pending delegation that cannot be
+  undelegated yet. Monad undelegates the remainder too when the amount left
+  behind is below the 1 gwei dust threshold; you later call `stake withdraw`. On
+  BNB Smart Chain the amount is converted to validator shares (--all uses your
+  whole share balance) and becomes claimable after the unbonding period.
 stake claim $target [REQUEST_NUMBER]
-  Claim accumulated rewards (Monad), or claim unbonded BNB (BNB Smart Chain).
+  Claim rewards to your account (Monad), or claim unbonded BNB (BNB Smart Chain).
+  Undelegating does not claim rewards: MON already accrued stays on the validator
+  and is paid by this command, with no epoch delay.
 stake withdraw VALIDATOR_ID WITHDRAW_ID   (Monad only)
   Reclaim an undelegated amount after the withdrawal delay.
 stake compound VALIDATOR_ID               (Monad only)
@@ -334,7 +339,8 @@ _STAKING_INDEX: tuple[tuple[str, str], ...] = (
     ("stake status [$target]", "Show the epoch and your delegations"),
     ("stake info $target", "Show one validator's details"),
     ("stake delegate $target AMOUNT [--dry-run | --yes]", ""),
-    ("stake undelegate $target AMOUNT [--dry-run | --yes]", ""),
+    ("stake undelegate $target AMOUNT", ""),
+    ("stake undelegate $target --all", "Remove the whole stake you hold with a validator"),
     ("stake claim $target [--dry-run | --yes]", ""),
     ("stake withdraw VALIDATOR_ID WITHDRAW_ID", "(Monad)"),
     ("stake compound VALIDATOR_ID", "(Monad)"),

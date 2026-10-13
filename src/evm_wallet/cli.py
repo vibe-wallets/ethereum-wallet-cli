@@ -647,10 +647,16 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             rows.append(("Validator", str(result["validator_id"])))
         if "amount" in result:
             rows.append(("Amount", result["amount"], "emphasis"))
+        if "scope" in result:
+            rows.append(("Scope", str(result["scope"]), "muted"))
         if "shares" in result:
             rows.append(("Shares", str(result["shares"])))
         if "withdraw_id" in result:
             rows.append(("Withdraw ID", str(result["withdraw_id"])))
+        if "pending_stake" in result:
+            rows.append(("Pending stake", str(result["pending_stake"]), "warning"))
+        if "unclaimed_rewards" in result:
+            rows.append(("Unclaimed rewards", str(result["unclaimed_rewards"]), "warning"))
         if "request_number" in result:
             request = result["request_number"]
             rows.append(("Request", "all" if request == 0 else str(request)))

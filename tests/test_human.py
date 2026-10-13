@@ -317,6 +317,30 @@ class ClearAndRenderTests(unittest.TestCase):
         self.assertIn("HISTORY", history.getvalue())
         self.assertIn("1  wallet list", history.getvalue())
 
+    def test_stake_undelegate_preview_shows_scope_and_left_behind_rewards(self):
+        output = io.StringIO()
+        _render_human(
+            {
+                "command": "stake undelegate",
+                "dry_run": True,
+                "chain": "monad",
+                "validator_id": "161",
+                "amount": "1000 MON",
+                "scope": "all active stake",
+                "withdraw_id": "0",
+                "pending_stake": "4 MON not undelegatable until it activates",
+                "unclaimed_rewards": "3 MON not claimed; run `stake claim 161`",
+                "estimated_gas": "200000",
+            },
+            output,
+        )
+        rendered = output.getvalue()
+        self.assertIn("STAKE UNDELEGATE · TRANSACTION PREVIEW", rendered)
+        self.assertIn("all active stake", rendered)
+        self.assertIn("Unclaimed rewards", rendered)
+        self.assertIn("stake claim 161", rendered)
+        self.assertIn("Pending stake", rendered)
+
     def test_wallet_rename_and_delete_render_confirmations(self):
         renamed = io.StringIO()
         _render_human(

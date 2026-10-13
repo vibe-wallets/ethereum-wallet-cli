@@ -81,7 +81,7 @@ stake validators [--limit N] [--all] [--full]
 stake status [VALIDATOR]
 stake info VALIDATOR [--delegators]
 stake delegate VALIDATOR AMOUNT [--dry-run | --yes]
-stake undelegate VALIDATOR AMOUNT [--dry-run | --yes]
+stake undelegate VALIDATOR AMOUNT | --all [--dry-run | --yes]
 stake claim VALIDATOR [--dry-run | --yes]
 history [COUNT]
 help [TOPIC]
@@ -92,7 +92,9 @@ On Monad, `VALIDATOR` is a validator ID and `AMOUNT` is MON; Monad also supports
 `stake withdraw VALIDATOR_ID WITHDRAW_ID` and `stake compound VALIDATOR_ID`. On BNB
 Smart Chain, `VALIDATOR` is a validator operator address and `AMOUNT` is BNB.
 Each launcher's `help` and usage errors name that chain's own argument instead:
-`VALIDATOR_ID` on Monad and `OPERATOR` on BNB Smart Chain.
+`VALIDATOR_ID` on Monad and `OPERATOR` on BNB Smart Chain. `stake undelegate --all`
+removes the whole stake held with that validator; it does not claim rewards, so
+the preview reports any unclaimed MON and the `stake claim` command that pays it.
 Staking commands are read-only except the write verbs, which estimate gas, ask
 for confirmation unless `--yes` is given, and sign through Foundry's hidden
 keystore prompt. Run `help stake` for details. `stake validators` lists the ten

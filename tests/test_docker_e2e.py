@@ -821,6 +821,24 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
                 self.assertIn("DELEGATIONS", staking_status)
                 self.assertIn("VALIDATOR", staking_status)
                 self.assertIn("\n11", staking_status)
+                undelegate_dry = shell.command("stake undelegate 11 --all --dry-run")
+                self.assertIn("all active stake", undelegate_dry)
+                self.assertIn("1 MON", undelegate_dry)
+                undelegated = shell.command(
+                    "stake undelegate 11 --all --yes", prompts=[(b"password:", password)]
+                )
+                self.assertIn("Stake undelegate submitted", undelegated)
+                self.assertIn("all active stake", undelegated)
+                self.assertNotIn(
+                    "1000000000000000000",
+                    sandbox.cast_call(
+                        node_alias,
+                        MONAD_STAKING_MOCK,
+                        "stake(address,uint64)(uint256)",
+                        account,
+                        "11",
+                    ),
+                )
             elif profile == "bsc":
                 stake_status = shell.command("stake status")
                 self.assertIn("STAKING STATUS", stake_status)
@@ -862,6 +880,18 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
                 staking_status_after = shell.command("status")
                 self.assertIn(BSC_MOCK_OPERATOR.lower(), staking_status_after.lower())
                 self.assertNotIn("No delegations found", staking_status_after)
+                undelegate_dry = shell.command(
+                    f"stake undelegate {BSC_MOCK_OPERATOR} --all --dry-run"
+                )
+                self.assertIn("all delegated shares", undelegate_dry)
+                self.assertIn("1000000000000000000", undelegate_dry)
+                undelegated = shell.command(
+                    f"stake undelegate {BSC_MOCK_OPERATOR} --all --yes",
+                    prompts=[(b"password:", password)],
+                )
+                self.assertIn("Stake undelegate submitted", undelegated)
+                self.assertIn("undelegate(address,uint256)", undelegated)
+                self.assertIn("1000000000000000000", undelegated)
 
             scratch = shell.command(
                 "wallet new scratch",

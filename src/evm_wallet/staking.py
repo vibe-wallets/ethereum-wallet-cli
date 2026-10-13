@@ -51,8 +51,9 @@ MONAD_KNOWN_FLAGS = sum(bit for bit, _ in MONAD_VALIDATOR_FLAGS)
 STAKING_USAGE = Template(
     "Usage: stake status [$target] | stake validators [--limit N] [--all] [--full] | "
     "stake info $target [--delegators] | "
-    "stake delegate $target AMOUNT [--dry-run | --yes] | stake undelegate $target AMOUNT "
-    "[--dry-run | --yes] | stake claim $target [--dry-run | --yes]. Monad also accepts "
+    "stake delegate $target AMOUNT [--dry-run | --yes] | stake undelegate $target "
+    "(AMOUNT | --all) [--dry-run | --yes] | stake claim $target [--dry-run | --yes]. "
+    "Monad also accepts "
     "stake withdraw VALIDATOR_ID WITHDRAW_ID and stake compound VALIDATOR_ID."
 )
 
@@ -453,14 +454,18 @@ class MonadStaking(_StakingBackend):
         )
         stake = _as_int(data[0], "stake")
         rewards = _as_int(data[2], "unclaimed rewards")
+        pending = _as_int(data[3], "pending stake")
+        next_pending = _as_int(data[4], "next pending stake")
         return {
             "validator_id": validator_id,
             "stake_wei": stake,
             "stake": format_units(stake, 18),
             "unclaimed_rewards_wei": rewards,
             "unclaimed_rewards": format_units(rewards, 18),
-            "pending_stake": format_units(_as_int(data[3], "pending stake"), 18),
-            "next_pending_stake": format_units(_as_int(data[4], "next pending stake"), 18),
+            "pending_stake_wei": pending,
+            "pending_stake": format_units(pending, 18),
+            "next_pending_stake_wei": next_pending,
+            "next_pending_stake": format_units(next_pending, 18),
             "pending_epoch": _as_int(data[5], "pending epoch"),
             "next_pending_epoch": _as_int(data[6], "next pending epoch"),
         }
@@ -581,13 +586,19 @@ class MonadStaking(_StakingBackend):
     def undelegate_command(self, app, state, chain, tokens) -> dict[str, Any]:
         dry_run, yes, args = self._amount_arguments(tokens)
         withdraw_raw, args = _pop_option(args, "--withdraw-id")
-        if len(args) != 2:
+        undelegate_all = "--all" in args
+        args = [token for token in args if token != "--all"]
+        if len(args) != (1 if undelegate_all else 2):
             raise WalletCliError(
                 f"Usage: stake undelegate {self.target_label} AMOUNT [--withdraw-id N] "
-                "[--dry-run | --yes]."
+                f"[--dry-run | --yes] | stake undelegate {self.target_label} --all "
+                "[--withdraw-id N] [--dry-run | --yes]."
             )
         validator_id = self._validator_id(args[0])
-        raw = to_base_units(args[1], 18)
+        if undelegate_all:
+            raw = 0  # resolved from the delegator's active stake below
+        else:
+            raw = to_base_units(args[1], 18)
         withdraw_id = 0
         if withdraw_raw is not None:
             try:
@@ -596,7 +607,38 @@ class MonadStaking(_StakingBackend):
                 raise WalletCliError("--withdraw-id must be between 0 and 255.") from None
         if not 0 <= withdraw_id <= 255:
             raise WalletCliError("--withdraw-id must be between 0 and 255.")
+        # The delegator read costs a call and needs a wallet, so it comes after
+        # the arguments have been checked.
+        _, metadata, _ = app.wallet(state=state)
+        delegator = self._delegator(app, chain, validator_id, metadata["address"])
+        if undelegate_all:
+            raw = delegator["stake_wei"]
+            if raw == 0:
+                raise WalletCliError(
+                    f"No active stake to undelegate from validator {validator_id}; "
+                    "pending delegations cannot be undelegated until they activate."
+                )
         amount = format_units(raw, 18)
+        preview = {
+            "validator_id": str(validator_id),
+            "amount": f"{amount} MON",
+            "withdraw_id": str(withdraw_id),
+        }
+        if undelegate_all:
+            preview["scope"] = "all active stake"
+        # Pending delegations cannot be undelegated, and rewards are paid by
+        # claimRewards rather than by undelegate, so neither is part of the amount
+        # above. Say so before the user signs instead of after.
+        pending = delegator["pending_stake_wei"] + delegator["next_pending_stake_wei"]
+        if pending:
+            preview["pending_stake"] = (
+                f"{format_units(pending, 18)} MON not undelegatable until it activates"
+            )
+        if delegator["unclaimed_rewards_wei"]:
+            preview["unclaimed_rewards"] = (
+                f"{delegator['unclaimed_rewards']} MON not claimed; "
+                f"run `stake claim {validator_id}`"
+            )
         return _run_transaction(
             app,
             state,
@@ -607,16 +649,13 @@ class MonadStaking(_StakingBackend):
             signature="undelegate(uint64,uint256,uint8)",
             arguments=[str(validator_id), str(raw), str(withdraw_id)],
             value_wei=0,
-            preview={
-                "validator_id": str(validator_id),
-                "amount": f"{amount} MON",
-                "withdraw_id": str(withdraw_id),
-            },
+            preview=preview,
             record={
                 "validator_id": validator_id,
                 "amount": amount,
                 "amount_base_units": str(raw),
                 "withdraw_id": withdraw_id,
+                "all": undelegate_all,
             },
             dry_run=dry_run,
             yes=yes,
@@ -1008,13 +1047,36 @@ class BscStaking(_StakingBackend):
     def undelegate_command(self, app, state, chain, tokens) -> dict[str, Any]:
         dry_run, yes, args = self._amount_arguments(tokens)
         shares_only = "--shares" in args
-        args = [token for token in args if token != "--shares"]
-        if len(args) != 2:
+        undelegate_all = "--all" in args
+        args = [token for token in args if token not in {"--shares", "--all"}]
+        if shares_only and undelegate_all:
+            raise WalletCliError("Choose either --shares or --all, not both.")
+        if len(args) != (1 if undelegate_all else 2):
             raise WalletCliError(
-                f"Usage: stake undelegate {self.target_label} AMOUNT [--shares] [--dry-run | --yes]."
+                f"Usage: stake undelegate {self.target_label} AMOUNT [--shares] "
+                f"[--dry-run | --yes] | stake undelegate {self.target_label} --all "
+                "[--dry-run | --yes]."
             )
         operator = validate_address(args[0], "operator address")
-        if shares_only:
+        preview_scope: str | None = None
+        if undelegate_all:
+            # Stake is held as shares in the validator's credit contract, so the
+            # delegator's whole position is that balance.
+            _, metadata, _ = app.wallet(state=state)
+            credit = self._credit_contract(app, chain, operator)
+            shares = _as_int(
+                _as_list(
+                    _read(app, chain, credit, _BALANCE_OF, metadata["address"]),
+                    "shares",
+                )[0],
+                "shares",
+            )
+            if shares <= 0:
+                raise WalletCliError(f"No stake to undelegate from {operator}.")
+            amount = format_units(shares, 18)
+            preview_amount = f"{amount} BNB-equivalent"
+            preview_scope = "all delegated shares"
+        elif shares_only:
             try:
                 shares = int(args[1], 10)
             except ValueError:
@@ -1037,6 +1099,9 @@ class BscStaking(_StakingBackend):
                 raise WalletCliError("That BNB amount is too small to undelegate.")
             amount = format_units(raw, 18)
             preview_amount = f"{amount} BNB"
+        preview = {"operator": operator, "amount": preview_amount, "shares": str(shares)}
+        if preview_scope:
+            preview["scope"] = preview_scope
         return _run_transaction(
             app,
             state,
@@ -1047,8 +1112,13 @@ class BscStaking(_StakingBackend):
             signature="undelegate(address,uint256)",
             arguments=[operator, str(shares)],
             value_wei=0,
-            preview={"operator": operator, "amount": preview_amount, "shares": str(shares)},
-            record={"operator": operator, "amount": amount, "shares": str(shares)},
+            preview=preview,
+            record={
+                "operator": operator,
+                "amount": amount,
+                "shares": str(shares),
+                "all": undelegate_all,
+            },
             dry_run=dry_run,
             yes=yes,
         )

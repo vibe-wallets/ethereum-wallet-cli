@@ -115,6 +115,12 @@ Staking on Monad and BNB Smart Chain
   stakes. `stake info` gained the same status plus an opt-in `--delegators` count
   that pages `getDelegators`. Network-wide totals, APR, and validator names are
   indexer data and are deliberately not invented.
+- `stake undelegate --all` removes the whole stake held with a validator: the
+  active stake on Monad (pending delegations cannot be removed until they
+  activate, and the precompile sweeps any remainder below the 1 gwei dust
+  threshold into the same withdrawal) and the whole share balance on BNB Smart
+  Chain. It does not claim rewards, so the Monad preview reports unclaimed MON
+  and names the `stake claim` call that pays it; undelegate leaves rewards intact.
 - Staking commands name their validator argument per chain, since each launcher
   serves one chain: `VALIDATOR_ID` on Monad and `OPERATOR` on BNB Smart Chain.
   The command index, the `stake` help topic, and every usage error render from
@@ -130,7 +136,7 @@ Staking on Monad and BNB Smart Chain
   plus `--chain-id 143`, which keeps the reported chain ID while freeing the
   address. Both profiles then perform a real signed delegation, verify the mock
   state, and check that plain `status` reports the resulting delegation.
-- Validation: 128 offline tests, plus the Docker E2E covering staking reads,
+- Validation: 140 offline tests, plus the Docker E2E covering staking reads,
   `status` delegations, dry-runs, a real signed write, and mock-state verification
   on Monad and BSC.
 

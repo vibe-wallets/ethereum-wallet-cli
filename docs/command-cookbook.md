@@ -138,12 +138,13 @@ stake status 97
 stake delegate 97 100 --dry-run
 stake delegate 97 100
 stake undelegate 97 50 --withdraw-id 0
+stake undelegate 97 --all
 stake withdraw 97 0
 stake claim 97
 stake compound 97
 ```
 
-Delegations below 1 gwei revert, and staking changes take effect at the next epoch boundary. Undelegating starts a withdrawal request; after the withdrawal delay you call `stake withdraw` with the same ID to reclaim the MON. `stake claim` withdraws accumulated rewards, while `stake compound` re-delegates them.
+`stake undelegate 97 --all` removes the whole active stake; if the amount left behind would be below the 1 gwei dust threshold, the remainder goes with it. Undelegating does not claim rewards: MON already accrued stays on the validator and is paid by `stake claim 97` with no epoch delay, so the preview warns when rewards would otherwise be left behind. Delegations below 1 gwei revert, and staking changes take effect at the next epoch boundary. Undelegating starts a withdrawal request; after the withdrawal delay you call `stake withdraw` with the same ID to reclaim the MON. `stake claim` withdraws accumulated rewards, while `stake compound` re-delegates them.
 
 `stake validators` lists the validators active in the current epoch, highest stake first, ten by default, with a status decoded from the validator flags (`ok`, `low-stake`, `withdrawn`, `double-sign`). `--all` adds eligible validators outside the active set, and `--full` adds the consensus and next-epoch snapshot stakes and prints full addresses. One validator is read per row, so a large `--limit` takes proportionally longer. Stake columns are rounded down to whole MON so the table stays readable; `--json` keeps the exact value. `stake info --delegators` pages through `getDelegators` for an exact delegator count, which can take a while for a popular validator.
 
@@ -161,11 +162,12 @@ stake delegate 0xValidatorOperatorAddress 1 --dry-run
 stake delegate 0xValidatorOperatorAddress 1
 stake undelegate 0xValidatorOperatorAddress 1
 stake undelegate 0xValidatorOperatorAddress 1000000000000000000 --shares
+stake undelegate 0xValidatorOperatorAddress --all
 stake claim 0xValidatorOperatorAddress
 stake claim 0xValidatorOperatorAddress 0
 ```
 
-Validators are listed with their stake and commission. `stake delegate` accepts the minimum delegation set by the network (currently 1 BNB). `stake undelegate` converts a BNB amount to validator shares; pass `--shares` to specify shares directly. Undelegated BNB becomes claimable after the unbonding period, and `stake claim` with request number `0` claims from all unbonding requests.
+Validators are listed with their stake and commission. `stake delegate` accepts the minimum delegation set by the network (currently 1 BNB). `stake undelegate` converts a BNB amount to validator shares; pass `--shares` to specify shares directly, or `--all` to undelegate your whole share balance. Undelegated BNB becomes claimable after the unbonding period, and `stake claim` with request number `0` claims from all unbonding requests.
 
 `status` lists the selected wallet's delegations. Because StakeHub keeps delegations per validator, the CLI reads the validator set and batches the share lookups through the canonical Multicall3 contract, so the scan costs a handful of calls rather than one per validator.
 

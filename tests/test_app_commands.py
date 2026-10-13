@@ -1000,6 +1000,7 @@ class AppCommandTests(unittest.TestCase):
 
     def test_monad_stake_writes_build_expected_cast_arguments(self) -> None:
         self.add_wallet()
+        self.runner.staking = self._monad_staking()
         app = self.make_app(terminal=True, profile="monad")
 
         dry = execute(["stake", "delegate", "11", "0.5", "--dry-run"], app)
@@ -1031,6 +1032,94 @@ class AppCommandTests(unittest.TestCase):
         self.assertIn("compound(uint64)", self.runner.commands()[-1])
         execute(["stake", "claim", "11", "--yes"], app)
         self.assertIn("claimRewards(uint64)", self.runner.commands()[-1])
+
+    def test_monad_undelegate_all_uses_the_active_stake(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        app = self.make_app(terminal=True, profile="monad")
+
+        dry = execute(["stake", "undelegate", "11", "--all", "--dry-run"], app)
+        # The fixture delegator holds 1 MON of active stake.
+        self.assertEqual(dry["amount"], "1 MON")
+        self.assertEqual(dry["validator_id"], "11")
+        self.assertEqual(dry["scope"], "all active stake")
+        self.assertTrue(dry["dry_run"])
+        self.assertNotIn("send", [call[0] for call in self.runner.commands()])
+
+        sent = execute(["stake", "undelegate", "11", "--all", "--yes"], app)
+        self.assertEqual(sent["transaction_hash"], TX_HASH)
+        undelegate = self.runner.commands()[-1]
+        self.assertIn("undelegate(uint64,uint256,uint8)", undelegate)
+        self.assertIn("1000000000000000000", undelegate)
+        self.assertEqual(execute(["tx", "list"], app)["transactions"][-1]["all"], True)
+
+    def test_monad_undelegate_reports_unclaimed_rewards_and_pending_stake(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        # Active stake 2 MON, 3 MON of rewards, 4 MON pending activation.
+        self.runner.staking[self.MONAD_DELEGATOR] = [
+            "2000000000000000000",
+            "0",
+            "3000000000000000000",
+            "4000000000000000000",
+            "0",
+            9,
+            0,
+        ]
+        app = self.make_app(terminal=True, profile="monad")
+
+        result = execute(["stake", "undelegate", "11", "0.5", "--dry-run"], app)
+        self.assertIn("3 MON", result["unclaimed_rewards"])
+        self.assertIn("stake claim 11", result["unclaimed_rewards"])
+        self.assertIn("4 MON", result["pending_stake"])
+        self.assertNotIn("scope", result)
+
+        # --all still only removes the active stake, which is what the chain allows.
+        every = execute(["stake", "undelegate", "11", "--all", "--dry-run"], app)
+        self.assertEqual(every["amount"], "2 MON")
+
+    def test_monad_undelegate_all_rejects_an_empty_position(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        self.runner.staking[self.MONAD_DELEGATOR] = ["0", "0", "0", "0", "0", 0, 0]
+        app = self.make_app(profile="monad")
+        with self.assertRaisesRegex(WalletCliError, "No active stake to undelegate"):
+            execute(["stake", "undelegate", "11", "--all", "--dry-run"], app)
+
+    def test_undelegate_usage_errors_cover_all(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        app = self.make_app(profile="monad")
+        with self.assertRaisesRegex(WalletCliError, r"--all \[--withdraw-id"):
+            execute(["stake", "undelegate", "11", "--all", "1", "--dry-run"], app)
+        with self.assertRaisesRegex(WalletCliError, r"--all"):
+            execute(["stake", "undelegate", "11"], app)
+
+        bsc = self.make_app(profile="bsc")
+        self.runner.staking = self._bsc_staking()
+        with self.assertRaisesRegex(WalletCliError, "Choose either"):
+            execute(
+                ["stake", "undelegate", self.BSC_OPERATOR, "--all", "--shares", "--dry-run"],
+                bsc,
+            )
+        with self.assertRaisesRegex(WalletCliError, "No stake to undelegate"):
+            execute(["stake", "undelegate", self.BSC_OPERATOR, "--all", "--dry-run"], bsc)
+
+    def test_bsc_undelegate_all_uses_the_whole_share_balance(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._bsc_staking()
+        shares = 7 * 10**18
+        self.runner.staking["balanceOf(address)(uint256)"] = [str(shares)]
+        app = self.make_app(terminal=True, profile="bsc")
+
+        dry = execute(["stake", "undelegate", self.BSC_OPERATOR, "--all", "--dry-run"], app)
+        self.assertEqual(dry["scope"], "all delegated shares")
+        self.assertEqual(dry["shares"], str(shares))
+
+        execute(["stake", "undelegate", self.BSC_OPERATOR, "--all", "--yes"], app)
+        undelegate = self.runner.commands()[-1]
+        self.assertIn("undelegate(address,uint256)", undelegate)
+        self.assertIn(str(shares), undelegate)
 
     def test_bsc_stake_reads_and_writes(self) -> None:
         self.add_wallet()
