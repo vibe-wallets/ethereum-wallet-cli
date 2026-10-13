@@ -73,6 +73,7 @@ STAKING_FLAGS = [
     "--dry-run",
     "--full",
     "--limit",
+    "--scan-withdrawals",
     "--no-vote-power",
     "--shares",
     "--withdraw-id",

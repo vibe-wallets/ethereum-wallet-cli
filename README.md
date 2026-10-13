@@ -78,7 +78,7 @@ send DESTINATION AMOUNT [--dry-run | --yes]
 token send CONTRACT DESTINATION AMOUNT [--dry-run | --yes]
 tx inspect HASH
 stake validators [--limit N] [--all] [--full]
-stake status [VALIDATOR]
+stake status [VALIDATOR] [--scan-withdrawals N]
 stake info VALIDATOR [--delegators]
 stake delegate VALIDATOR AMOUNT [--dry-run | --yes]
 stake undelegate VALIDATOR AMOUNT | --all [--dry-run | --yes]
@@ -91,6 +91,12 @@ clear
 On Monad, `VALIDATOR` is a validator ID and `AMOUNT` is MON; Monad also supports
 `stake withdraw VALIDATOR_ID WITHDRAW_ID` and `stake compound VALIDATOR_ID`. On BNB
 Smart Chain, `VALIDATOR` is a validator operator address and `AMOUNT` is BNB.
+`stake status` reports the epoch, each delegation's stake, unclaimed rewards and
+pending stake, and undelegated stake that is still waiting to be withdrawn. A
+position that was undelegated in full stays listed while it still has rewards or a
+withdrawal; the precompile cannot list withdrawal requests, so `--scan-withdrawals N`
+also checks ids 0 to N-1 for requests another tool created.
+
 Each launcher's `help` and usage errors name that chain's own argument instead:
 `VALIDATOR_ID` on Monad and `OPERATOR` on BNB Smart Chain. `stake undelegate --all`
 removes the whole stake held with that validator; it does not claim rewards, so

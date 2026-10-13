@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from .amounts import format_units, to_base_units, validate_address
 from .errors import FoundryError, WalletCliError
+from .txlog import TXLOG_LIMIT, read_transactions
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .app import Application
@@ -32,6 +33,8 @@ _AGGREGATE3 = "aggregate3((address,bool,bytes)[])((bool,bytes)[])"
 _BALANCE_OF = "balanceOf(address)(uint256)"
 
 MONAD_DUST_THRESHOLD_WEI = 1_000_000_000  # 1 gwei, per Monad staking API
+MONAD_WITHDRAWAL_DELAY_EPOCHS = 1  # WITHDRAWAL_DELAY, per Monad staking API
+MONAD_WITHDRAW_ID_LIMIT = 256  # withdraw ids are a uint8, so 0-255
 MONAD_COMMISSION_BASE = 10**18
 BSC_COMMISSION_BASE = 10_000
 BSC_DEFAULT_LIMIT = 10
@@ -49,7 +52,8 @@ MONAD_KNOWN_FLAGS = sum(bit for bit, _ in MONAD_VALIDATOR_FLAGS)
 # The stake target is a validator ID on Monad and an operator address on BNB Smart
 # Chain, so usage lines and help name it per chain through $target.
 STAKING_USAGE = Template(
-    "Usage: stake status [$target] | stake validators [--limit N] [--all] [--full] | "
+    "Usage: stake status [$target] [--scan-withdrawals N] | "
+    "stake validators [--limit N] [--all] [--full] | "
     "stake info $target [--delegators] | "
     "stake delegate $target AMOUNT [--dry-run | --yes] | stake undelegate $target "
     "(AMOUNT | --all) [--dry-run | --yes] | stake claim $target [--dry-run | --yes]. "
@@ -193,6 +197,35 @@ def _limit_option(tokens: list[str], *, default: int, maximum: int) -> tuple[int
     if limit < 1:
         raise WalletCliError("--limit must be a positive integer.")
     return min(limit, maximum), remaining
+
+
+def _count_option(tokens: list[str], name: str, *, maximum: int) -> tuple[int, list[str]]:
+    """Parse ``--name N`` as a bounded count that defaults to zero when absent."""
+    raw, remaining = _pop_option(tokens, name)
+    if raw is None:
+        return 0, remaining
+    try:
+        count = int(raw, 10)
+    except ValueError:
+        raise WalletCliError(f"{name} must be a non-negative integer.") from None
+    if count < 0:
+        raise WalletCliError(f"{name} must be a non-negative integer.")
+    return min(count, maximum), remaining
+
+
+def _recorded_staking_records(app: Application, chain: Chain, address: str) -> list[dict[str, Any]]:
+    """Return this CLI's own staking records for one address on one chain.
+
+    A delegator that removes all of its stake also drops out of the chain's own
+    delegator list, so the local log is what keeps an emptied position visible.
+    """
+    return [
+        record
+        for record in read_transactions(app.transactions_path, limit=TXLOG_LIMIT)
+        if record.get("chain_id") == chain.chain_id
+        and str(record.get("from", "")).lower() == address.lower()
+        and str(record.get("kind", "")).startswith("stake ")
+    ]
 
 
 def _run_transaction(
@@ -359,6 +392,7 @@ class MonadStaking(_StakingBackend):
         "getDelegator(uint64,address)(uint256,uint256,uint256,uint256,uint256,uint64,uint64)"
     )
     _DELEGATIONS = "getDelegations(address,uint64)(bool,uint64,uint64[])"
+    _WITHDRAWAL = "getWithdrawalRequest(uint64,address,uint8)(uint256,uint256,uint64)"
     _DELEGATORS = "getDelegators(uint64,address)(bool,address,address[])"
 
     @staticmethod
@@ -404,12 +438,6 @@ class MonadStaking(_StakingBackend):
             "secp_pubkey": str(data[10]),
             "bls_pubkey": str(data[11]),
         }
-
-    def _delegations(self, app: Application, chain: Chain, address: str) -> list[dict[str, Any]]:
-        validator_ids = self._paginated_ids(app, chain, self._DELEGATIONS, "delegations", address)
-        return [
-            self._delegator(app, chain, validator_id, address) for validator_id in validator_ids
-        ]
 
     def _paginated_ids(
         self, app: Application, chain: Chain, signature: str, label: str, *prefix: str
@@ -471,15 +499,27 @@ class MonadStaking(_StakingBackend):
         }
 
     def status_command(self, app, state, chain, tokens) -> dict[str, Any]:
+        scan, tokens = _count_option(tokens, "--scan-withdrawals", maximum=MONAD_WITHDRAW_ID_LIMIT)
         if len(tokens) > 1:
-            raise WalletCliError(f"Usage: stake status [{self.target_label}].")
+            raise WalletCliError(
+                f"Usage: stake status [{self.target_label}] [--scan-withdrawals N]."
+            )
         epoch, in_delay = self._epoch(app, chain)
         _, metadata, _ = app.wallet(state=state)
         address = metadata["address"]
         if tokens:
-            delegations = [self._delegator(app, chain, self._validator_id(tokens[0]), address)]
+            validator_ids = [self._validator_id(tokens[0])]
+            delegations = [self._delegator(app, chain, validator_ids[0], address)]
         else:
-            delegations = self.delegations_summary(app, chain, address)
+            validator_ids = self._delegation_ids(app, chain, address)
+            delegations = [
+                delegation
+                for delegation in (
+                    self._delegator(app, chain, validator_id, address)
+                    for validator_id in validator_ids
+                )
+                if self._has_position(delegation)
+            ]
         return {
             "command": "stake status",
             "chain": app.network_label(chain),
@@ -488,12 +528,115 @@ class MonadStaking(_StakingBackend):
             "epoch": epoch,
             "in_epoch_delay": in_delay,
             "dust_threshold": f"{format_units(MONAD_DUST_THRESHOLD_WEI, 18)} MON",
-            "withdrawal_delay_epochs": 1,
+            "withdrawal_delay_epochs": MONAD_WITHDRAWAL_DELAY_EPOCHS,
+            "scanned_withdraw_ids": scan,
             "delegations": delegations,
+            "withdrawals": self._withdrawals(app, chain, address, validator_ids, scan, epoch),
         }
 
     def delegations_summary(self, app, chain, address) -> list[dict[str, Any]]:
-        return self._delegations(app, chain, address)
+        return [
+            delegation
+            for delegation in (
+                self._delegator(app, chain, validator_id, address)
+                for validator_id in self._delegation_ids(app, chain, address)
+            )
+            if self._has_position(delegation)
+        ]
+
+    @staticmethod
+    def _has_position(delegation: dict[str, Any]) -> bool:
+        """Return whether a delegator still holds stake, rewards, or pending stake."""
+        return bool(
+            delegation["stake_wei"]
+            or delegation["unclaimed_rewards_wei"]
+            or delegation["pending_stake_wei"]
+            or delegation["next_pending_stake_wei"]
+        )
+
+    def _delegation_ids(self, app: Application, chain: Chain, address: str) -> list[int]:
+        """Return the validators an address is known to hold a delegation with.
+
+        The chain list alone loses an emptied position: a delegator that undelegates
+        everything leaves ``getDelegations``, taking its unclaimed rewards and pending
+        withdrawals out of view, so this CLI's own staking records are added to it.
+        """
+        validator_ids = self._paginated_ids(app, chain, self._DELEGATIONS, "delegations", address)
+        for record in _recorded_staking_records(app, chain, address):
+            validator_id = record.get("validator_id")
+            if isinstance(validator_id, int) and validator_id not in validator_ids:
+                validator_ids.append(validator_id)
+        return validator_ids
+
+    def _withdrawals(
+        self,
+        app: Application,
+        chain: Chain,
+        address: str,
+        validator_ids: list[int],
+        scan: int,
+        epoch: int,
+    ) -> list[dict[str, Any]]:
+        """Return the pending undelegations of an address that are still withdrawable.
+
+        The precompile cannot list withdrawal requests, only answer for one
+        ``(validator, delegator, withdrawId)`` at a time, so the ids this CLI recorded
+        are checked and ``--scan-withdrawals N`` adds ids 0 to N-1 for requests that
+        another tool may have created.
+        """
+        recorded: dict[int, set[int]] = {}
+        for record in _recorded_staking_records(app, chain, address):
+            validator_id = record.get("validator_id")
+            withdraw_id = record.get("withdraw_id")
+            if isinstance(validator_id, int) and isinstance(withdraw_id, int):
+                recorded.setdefault(validator_id, set()).add(withdraw_id)
+        withdrawals = []
+        for validator_id in validator_ids:
+            ids = sorted(set(recorded.get(validator_id, ())) | set(range(scan)))
+            for withdraw_id in ids:
+                request = self._withdrawal(app, chain, address, validator_id, withdraw_id, epoch)
+                if request is not None:
+                    withdrawals.append(request)
+        return withdrawals
+
+    def _withdrawal(
+        self,
+        app: Application,
+        chain: Chain,
+        address: str,
+        validator_id: int,
+        withdraw_id: int,
+        epoch: int,
+    ) -> dict[str, Any] | None:
+        """Return one pending withdrawal request, or ``None`` when it is empty."""
+        data = _as_list(
+            _read(
+                app,
+                chain,
+                self.address,
+                self._WITHDRAWAL,
+                str(validator_id),
+                address,
+                str(withdraw_id),
+            ),
+            "withdrawal",
+        )
+        amount = _as_int(data[0], "withdrawal amount")
+        if amount == 0:
+            return None
+        # The request stores the epoch the undelegation activates in; the funds become
+        # withdrawable one WITHDRAWAL_DELAY later, and keep earning until then.
+        activation = _as_int(data[2], "withdrawal epoch")
+        withdrawable = activation + MONAD_WITHDRAWAL_DELAY_EPOCHS
+        return {
+            "validator_id": validator_id,
+            "withdraw_id": withdraw_id,
+            "amount_wei": amount,
+            "amount": format_units(amount, 18),
+            "activation_epoch": activation,
+            "withdrawable_epoch": withdrawable,
+            "ready": withdrawable <= epoch,
+        }
 
     def validators_command(self, app, state, chain, tokens) -> dict[str, Any]:
         limit, remaining = _limit_option(tokens, default=MONAD_DEFAULT_LIMIT, maximum=500)
@@ -899,14 +1042,42 @@ class BscStaking(_StakingBackend):
         }
 
     def delegations_summary(self, app, chain, address) -> list[dict[str, Any]]:
-        """Find the address's delegations across the validator set's credit contracts."""
-        pairs = self._validator_credits(app, chain)
-        balances = _batch_balances(app, chain, [credit for _, credit in pairs], address)
-        return [
-            self._delegation(app, chain, operator, address, credit=credit, shares=shares)
-            for (operator, credit), shares in zip(pairs, balances)
-            if shares > 0
-        ]
+        """Find the address's delegations across the validator set's credit contracts.
+
+        Operators this CLI recorded a staking write for are included as well: an
+        operator whose shares reach zero leaves the balance scan, which would hide the
+        unbonding and claimable BNB left behind there.
+        """
+        known = {
+            operator.lower(): (operator, credit)
+            for operator, credit in self._validator_credits(app, chain)
+        }
+        recorded = set()
+        for record in _recorded_staking_records(app, chain, address):
+            operator = str(record.get("operator", ""))
+            if not operator:
+                continue
+            recorded.add(operator.lower())
+            if operator.lower() not in known:
+                known[operator.lower()] = (operator, self._credit_contract(app, chain, operator))
+        balances = _batch_balances(app, chain, [credit for _, credit in known.values()], address)
+        delegations = []
+        for key, shares in zip(known, balances):
+            # A validator's details cost several calls, so credit contracts this address
+            # never touched are skipped unless it staked there through this CLI.
+            if not shares and key not in recorded:
+                continue
+            operator, credit = known[key]
+            delegation = self._delegation(
+                app, chain, operator, address, credit=credit, shares=shares
+            )
+            if (
+                shares > 0
+                or delegation["pending_unbond_requests"]
+                or delegation["claimable_unbond_requests"]
+            ):
+                delegations.append(delegation)
+        return delegations
 
     def _delegation(
         self,

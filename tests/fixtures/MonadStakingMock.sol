@@ -10,6 +10,8 @@ pragma solidity 0.8.30;
 contract MonadStakingMock {
     mapping(address => mapping(uint64 => uint256)) public stake;
     mapping(address => mapping(uint64 => uint256)) public rewards;
+    mapping(address => mapping(uint64 => mapping(uint8 => uint256))) public withdrawalAmount;
+    mapping(address => mapping(uint64 => mapping(uint8 => uint64))) public withdrawalEpoch;
 
     function getEpoch() external pure returns (uint64, bool) {
         return (7, false);
@@ -104,10 +106,32 @@ contract MonadStakingMock {
         stake[msg.sender][validatorId] += msg.value;
     }
 
-    function undelegate(uint64 validatorId, uint256 amount, uint8) external returns (bool) {
+    function undelegate(
+        uint64 validatorId,
+        uint256 amount,
+        uint8 withdrawId
+    ) external returns (bool) {
         require(stake[msg.sender][validatorId] >= amount, "insufficient stake");
         stake[msg.sender][validatorId] -= amount;
+        // The real precompile stores the epoch the undelegation activates in, which is
+        // one epoch later (or two inside the epoch delay period).
+        withdrawalAmount[msg.sender][validatorId][withdrawId] = amount;
+        withdrawalEpoch[msg.sender][validatorId][withdrawId] = 8;
         return true;
+    }
+
+    function getWithdrawalRequest(
+        uint64 validatorId,
+        address delegator,
+        uint8 withdrawId
+    ) external view returns (uint256, uint256, uint64) {
+        return 0 == withdrawalEpoch[delegator][validatorId][withdrawId]
+            ? (0, 0, 0)
+            : (
+                withdrawalAmount[delegator][validatorId][withdrawId],
+                0,
+                withdrawalEpoch[delegator][validatorId][withdrawId]
+            );
     }
 
     function withdraw(uint64, uint8) external pure returns (bool) {

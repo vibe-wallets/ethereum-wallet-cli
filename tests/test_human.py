@@ -317,6 +317,59 @@ class ClearAndRenderTests(unittest.TestCase):
         self.assertIn("HISTORY", history.getvalue())
         self.assertIn("1  wallet list", history.getvalue())
 
+    def test_stake_status_lists_pending_withdrawals(self):
+        status = {
+            "command": "stake status",
+            "chain": "monad",
+            "address": "0x" + "11" * 20,
+            "epoch": 2263,
+            "in_epoch_delay": False,
+            "dust_threshold": "0.000000001 MON",
+            "withdrawal_delay_epochs": 1,
+            "scanned_withdraw_ids": 0,
+            "delegations": [
+                {
+                    "validator_id": 161,
+                    "stake": "0",
+                    "stake_wei": 0,
+                    "unclaimed_rewards": "394544.29",
+                    "pending_stake": "0",
+                }
+            ],
+            "withdrawals": [
+                {
+                    "validator_id": 161,
+                    "withdraw_id": 0,
+                    "amount": "100000.75",
+                    "ready": True,
+                    "withdrawable_epoch": 2264,
+                },
+                {
+                    "validator_id": 161,
+                    "withdraw_id": 1,
+                    "amount": "500",
+                    "ready": False,
+                    "withdrawable_epoch": 2265,
+                },
+            ],
+        }
+        output = io.StringIO()
+        _render_human(status, output)
+        rendered = output.getvalue()
+        self.assertIn("PENDING WITHDRAWALS", rendered)
+        self.assertIn("WITHDRAW ID", rendered)
+        self.assertIn("100000", rendered)
+        self.assertIn("now", rendered)
+        self.assertIn("epoch 2265", rendered)
+        self.assertIn("stake withdraw VALIDATOR_ID WITHDRAW_ID", rendered)
+        # The emptied position keeps its unclaimed rewards on show.
+        self.assertIn("394544.29", rendered)
+
+        empty = io.StringIO()
+        _render_human({**status, "withdrawals": []}, empty)
+        self.assertIn("No pending withdrawals found", empty.getvalue())
+        self.assertIn("--scan-withdrawals", empty.getvalue())
+
     def test_stake_undelegate_preview_shows_scope_and_left_behind_rewards(self):
         output = io.StringIO()
         _render_human(

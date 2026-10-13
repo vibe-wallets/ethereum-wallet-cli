@@ -834,6 +834,7 @@ class AppCommandTests(unittest.TestCase):
         "getDelegator(uint64,address)(uint256,uint256,uint256,uint256,uint256,uint64,uint64)"
     )
     MONAD_DELEGATIONS = "getDelegations(address,uint64)(bool,uint64,uint64[])"
+    MONAD_WITHDRAWAL = "getWithdrawalRequest(uint64,address,uint8)(uint256,uint256,uint64)"
 
     BSC_ELECTION = "getValidatorElectionInfo(uint256,uint256)(address[],uint256[],bytes[],uint256)"
     BSC_CONSENSUS_TO_OPERATOR = "consensusToOperator(address)(address)"
@@ -882,6 +883,8 @@ class AppCommandTests(unittest.TestCase):
                 0,
             ],
             self.MONAD_DELEGATIONS: [True, 0, [11]],
+            # 5 MON undelegated with withdraw id 0 in activation epoch + 1.
+            self.MONAD_WITHDRAWAL: ["5000000000000000000", "0", 8],
         }
 
     def _bsc_staking(self, shares: int = 10**18) -> dict[str, object]:
@@ -1032,6 +1035,61 @@ class AppCommandTests(unittest.TestCase):
         self.assertIn("compound(uint64)", self.runner.commands()[-1])
         execute(["stake", "claim", "11", "--yes"], app)
         self.assertIn("claimRewards(uint64)", self.runner.commands()[-1])
+
+    def test_monad_status_keeps_an_emptied_position_and_its_withdrawal(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        app = self.make_app(terminal=True, profile="monad")
+        # Broadcasting records validator 11 with withdraw id 0 in the local log.
+        execute(["stake", "undelegate", "11", "--all", "--yes"], app)
+
+        # One epoch later the chain has dropped the delegator, but 3 MON of rewards and
+        # the withdrawal request are still there.
+        self.runner.staking[self.MONAD_DELEGATIONS] = [True, 0, []]
+        self.runner.staking[self.MONAD_DELEGATOR] = [
+            "0",
+            "0",
+            "3000000000000000000",
+            "0",
+            "0",
+            0,
+            0,
+        ]
+
+        result = execute(["stake", "status"], app)
+        self.assertEqual([item["validator_id"] for item in result["delegations"]], [11])
+        self.assertEqual(result["delegations"][0]["unclaimed_rewards"], "3")
+        self.assertEqual(result["delegations"][0]["stake"], "0")
+        withdrawals = result["withdrawals"]
+        self.assertEqual([item["withdraw_id"] for item in withdrawals], [0])
+        self.assertEqual(withdrawals[0]["amount"], "5")
+        self.assertFalse(withdrawals[0]["ready"])
+        self.assertEqual(withdrawals[0]["withdrawable_epoch"], 9)
+
+    def test_monad_status_withdrawals_are_opt_in_and_can_be_scanned(self) -> None:
+        self.add_wallet()
+        self.runner.staking = self._monad_staking()
+        app = self.make_app(profile="monad")
+        # No local record, so nothing is probed and no call is made.
+        plain = execute(["stake", "status"], app)
+        self.assertEqual(plain["withdrawals"], [])
+        self.assertEqual(plain["scanned_withdraw_ids"], 0)
+        commands = [" ".join(str(part) for part in call) for call in self.runner.commands()]
+        self.assertFalse([command for command in commands if "getWithdrawalRequest" in command])
+
+        # --scan-withdrawals looks for requests another tool may have created.
+        self.runner.staking[self.MONAD_WITHDRAWAL] = ["5000000000000000000", "0", 5]
+        scanned = execute(["stake", "status", "11", "--scan-withdrawals", "2"], app)
+        self.assertEqual(scanned["scanned_withdraw_ids"], 2)
+        self.assertEqual([item["withdraw_id"] for item in scanned["withdrawals"]], [0, 1])
+        # The withdrawal delay has passed at epoch 7, so it can be withdrawn now.
+        self.assertTrue(all(item["ready"] for item in scanned["withdrawals"]))
+        self.assertEqual(scanned["withdrawals"][0]["withdrawable_epoch"], 6)
+
+        with self.assertRaisesRegex(WalletCliError, "scan-withdrawals"):
+            execute(["stake", "status", "11", "--scan-withdrawals", "-1"], app)
+        with self.assertRaisesRegex(WalletCliError, r"Usage: stake status"):
+            execute(["stake", "status", "11", "22"], app)
 
     def test_monad_undelegate_all_uses_the_active_stake(self) -> None:
         self.add_wallet()

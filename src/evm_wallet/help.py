@@ -203,9 +203,12 @@ stake validators [--limit N] [--all] [--full]
   withdrawn, double-sign) and the auth address. --full adds the consensus and
   next-epoch snapshot stakes and prints unshortened addresses. Read one validator
   per row, so a large --limit is slow.
-stake status [$target]
-  Show the current epoch and your delegations. On BNB Smart Chain, pass an
-  operator address to see that validator's pool and your share balance.
+stake status [$target] [--scan-withdrawals N]
+  Show the current epoch, your delegations (stake, unclaimed rewards, and pending
+  stake), and any undelegated stake that is waiting to be withdrawn. On BNB Smart
+  Chain, pass an operator address to see that validator's pool and your share
+  balance. The precompile cannot list withdrawal requests, so the ones this CLI
+  recorded are checked; --scan-withdrawals N also checks ids 0 to N-1.
 stake info $target [--delegators]
   Show one validator's full details: status, execution, consensus and snapshot
   stake and commission, the unclaimed reward pool, and the consensus keys.
@@ -336,7 +339,7 @@ _NEEDS_VERBOSE = (
 # so the same rows render as VALIDATOR_ID on Monad and OPERATOR on BNB Smart Chain.
 _STAKING_INDEX: tuple[tuple[str, str], ...] = (
     ("stake validators [--limit N]", "List active validators, highest stake first"),
-    ("stake status [$target]", "Show the epoch and your delegations"),
+    ("stake status [$target]", "Show the epoch, your delegations, and withdrawals"),
     ("stake info $target", "Show one validator's details"),
     ("stake delegate $target AMOUNT [--dry-run | --yes]", ""),
     ("stake undelegate $target AMOUNT", ""),

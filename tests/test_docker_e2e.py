@@ -839,6 +839,12 @@ class DockerLauncherEndToEndTests(unittest.TestCase):
                         "11",
                     ),
                 )
+                # The withdrawn stake is still in flight, and status says so.
+                after = shell.command("stake status")
+                self.assertIn("PENDING WITHDRAWALS", after)
+                self.assertIn("WITHDRAW ID", after)
+                self.assertIn("getWithdrawalRequest", after)
+                self.assertIn("epoch 9", after)
             elif profile == "bsc":
                 stake_status = shell.command("stake status")
                 self.assertIn("STAKING STATUS", stake_status)

@@ -510,6 +510,7 @@ def _render_human(result: dict[str, object], output: TextIO | None = None) -> No
             print(section_title("STAKING STATUS", stream=output), file=output)
             print(key_value_rows(rows, stream=output), file=output)
             _print_delegations(result.get("delegations", []), output)
+            _print_withdrawals(result, output)
         else:
             parameters = result.get("parameters", {})
             rows = [
@@ -705,6 +706,51 @@ def _validators_title(result: dict[str, object], output: TextIO) -> str:
     key = "active_count" if result.get("active_only", True) else "eligible_count"
     suffix = f" · epoch {epoch} · {result.get(key)} {scope}"
     return f"{title}{color(suffix, 'muted', stream=output)}"
+
+
+def _print_withdrawals(result: dict[str, object], output: TextIO) -> None:
+    """List undelegated stake that is still waiting to be withdrawn."""
+    if "withdrawals" not in result:
+        return
+    withdrawals = result.get("withdrawals") or []
+    if not withdrawals:
+        scanned = result.get("scanned_withdraw_ids") or 0
+        hint = "No pending withdrawals found."
+        if not scanned:
+            hint += (
+                " The precompile cannot list withdrawal requests, so only ids this CLI"
+                " recorded were checked; --scan-withdrawals N also checks ids 0 to N-1."
+            )
+        print(color(hint, "muted", stream=output), file=output)
+        return
+    rows = [
+        [
+            str(item["validator_id"]),
+            str(item["withdraw_id"]),
+            whole_amount(item["amount"]),
+            "now" if item["ready"] else f"epoch {item['withdrawable_epoch']}",
+        ]
+        for item in withdrawals
+    ]
+    print(section_title("PENDING WITHDRAWALS", stream=output), file=output)
+    print(
+        table(
+            rows,
+            ["VALIDATOR", "WITHDRAW ID", "AMOUNT (MON)", "WITHDRAWABLE"],
+            stream=output,
+            right_align=("WITHDRAW ID", "AMOUNT (MON)"),
+        ),
+        file=output,
+    )
+    print(
+        color(
+            "Undelegated stake keeps earning until it is withdrawn with"
+            " `stake withdraw VALIDATOR_ID WITHDRAW_ID`.",
+            "muted",
+            stream=output,
+        ),
+        file=output,
+    )
 
 
 def _print_delegations(delegations: Sequence[dict[str, object]], output: TextIO) -> None:

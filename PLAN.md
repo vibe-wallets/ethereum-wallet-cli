@@ -121,6 +121,14 @@ Staking on Monad and BNB Smart Chain
   threshold into the same withdrawal) and the whole share balance on BNB Smart
   Chain. It does not claim rewards, so the Monad preview reports unclaimed MON
   and names the `stake claim` call that pays it; undelegate leaves rewards intact.
+- `stake status` lists undelegated stake that is still waiting to be withdrawn, one
+  row per request with the epoch it becomes withdrawable in, and keeps a position
+  that was undelegated in full on show: the chain drops an emptied delegator from
+  `getDelegations`, which used to hide its unclaimed rewards and withdrawals. The
+  precompile cannot list withdrawal requests, so ids this CLI recorded are checked
+  and `--scan-withdrawals N` probes ids 0 to N-1 as well. BNB Smart Chain does the
+  same for operators whose shares reached zero but which still have unbonding or
+  claimable BNB.
 - Staking commands name their validator argument per chain, since each launcher
   serves one chain: `VALIDATOR_ID` on Monad and `OPERATOR` on BNB Smart Chain.
   The command index, the `stake` help topic, and every usage error render from
@@ -136,7 +144,7 @@ Staking on Monad and BNB Smart Chain
   plus `--chain-id 143`, which keeps the reported chain ID while freeing the
   address. Both profiles then perform a real signed delegation, verify the mock
   state, and check that plain `status` reports the resulting delegation.
-- Validation: 140 offline tests, plus the Docker E2E covering staking reads,
+- Validation: 143 offline tests, plus the Docker E2E covering staking reads,
   `status` delegations, dry-runs, a real signed write, and mock-state verification
   on Monad and BSC.
 
